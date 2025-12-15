@@ -1,0 +1,111 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aiops_api
+    restart: always
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - .:/app
+      - ./data/logs:/app/data/logs
+      - ./data/playbooks:/app/data/playbooks
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - elasticsearch
+      - milvus
+      - ollama
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aiops_bot
+    restart: always
+    command: ["python", "bot/main.py"]
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      - api
+
+  redis:
+    image: redis:7-alpine
+    container_name: aiops_redis
+    restart: always
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+
+  elasticsearch:
+    image: elasticsearch:8.11.3
+    container_name: aiops_elasticsearch
+    restart: always
+    ports:
+      - "${ELASTICSEARCH_PORT:-9200}:9200"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+
+  milvus:
+    image: milvusdb/milvus:v2.3.3-standalone
+    container_name: aiops_milvus
+    restart: always
+    ports:
+      - "${MILVUS_PORT:-19530}:19530"
+      - "9091:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    environment:
+      - "ETCD_USE_EMBED=true"
+      - "ETCD_DATA_DIR=/var/lib/milvus/etcd"
+      - "COMMON_MINIO_BUCKET=milvus-bucket"
+
+  ollama:
+    image: ollama/ollama
+    container_name: aiops_ollama
+    restart: always
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # Раскомментируйте, если у вас есть NVIDIA GPU
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  n8n:
+    image: n8nio/n8n
+    container_name: aiops_n8n
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=${N8N_DOMAIN}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - WEBHOOK_URL=http://${N8N_DOMAIN}:5678/
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  redis_data:
+  es_data:
+  milvus_data:
+  ollama_data:
+  n8n_data:
