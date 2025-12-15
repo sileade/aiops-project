@@ -11,6 +11,7 @@ from app.services.ansible_service import AnsibleService
 from app.services.post_analysis_service import PostAnalysisService
 from app.services.verification_service import VerificationService
 from app.services.telegram_service import TelegramService
+from app.services.history_service import HistoryService
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ class OrchestrationService:
         self.post_analysis_service = PostAnalysisService()
         self.verification_service = VerificationService()
         self.telegram_service = TelegramService()
+        self.history_service = HistoryService()
 
     async def execute_and_verify_remediation(
         self, 
@@ -54,7 +56,9 @@ class OrchestrationService:
         )
 
         # --- Шаг 2: Пост-анализ результатов ---
-        await self.telegram_service.send_message(settings.admin_chat_id, "🤔 Анализ результатов выполнения...")
+      await self.history_service.update_step_status(cycle.id, StepName.EXECUTION, StepStatus.SUCCESS, details={"output": execution_result})
+        await self.history_service.add_step(cycle.id, StepName.POST_ANALYSIS)
+        await self.telegram_service.send_message(settings.admin_chat_id, "🤔 Анализ результатов...")полнения...")
         analysis = self.post_analysis_service.analyze_execution_results(output, original_problem)
         
         await self.telegram_service.send_message(
@@ -63,11 +67,19 @@ class OrchestrationService:
         )
 
         if analysis["status"] == "FAILURE":
-            await self.telegram_service.send_message(settings.admin_chat_id, "Похоже, исправление не удалось. Рекомендуется ручная проверка.")
+          await self.history_service.update_step_status(cycle.id, StepName.VERIFICATION, StepStatus.SUCCESS)
+        await self.history_service.close_cycle(cycle.id, CycleStatus.SUCCESS, "Проблема успешно решена и верифицирована.")
+        await self.telegram_service.send_message(settings.admin_chat_id, "🎉 Проблема решена!")е не удалось. Рекомендуется ручная проверка.")
             return
 
         # --- Шаг 3: Верификация исправления ---
-        await self.telegram_service.send_message(settings.admin_chat_id, "🔍 Верификация исправления... (ожидание 60 секунд)")
+        cycle = await self.history_service.create_cycle(device_type, device_host, original_problem)
+        await self.history_service.add_step(cycle.id, StepName.EXECUTION, details={"playbook_name": playbook_name})
+       await self.history_service.update_step_status(cycle.id, StepName.POST_ANALYSIS, StepStatus.SUCCESS, details=analysis_result)
+        await self.history_service.add_step(cycle.id, StepName.VERIFICATION)
+        await self.history_service.update_step_status(cycle.id, StepName.VERIFICATION, StepStatus.FAILURE)
+        await self.history_service.close_cycle(cycle.id, CycleStatus.FAILURE, "Верификация не удалась, проблема все еще существует.")
+        await self.telegram_service.send_message(settings.admin_chat_id, "⚠️ Верификация не удалась!"). (ожидание 60 секунд)")
         is_fixed = self.verification_service.verify_fix(original_log_query, device_type)
 
         if is_fixed:
