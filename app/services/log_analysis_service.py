@@ -1,11 +1,5 @@
 '''
-Сервисный модуль для анализа логов из Elasticsearch.
-
-Этот модуль отвечает за:
-- Подключение к Elasticsearch.
-- Запрос и получение логов по заданным критериям.
-- Предварительную обработку и агрегацию логов.
-- Передачу обработанных логов в AI-сервис для анализа.
+Сервисный модуль для анализа логов из Elasticsearch и генерации плейбуков.
 '''
 
 import logging
@@ -13,118 +7,108 @@ from elasticsearch import Elasticsearch
 from datetime import datetime, timedelta
 
 from config.settings import settings
-from app.services.ai_service import AIService
+from app.services.qwen_service import QwenService
+from app.services.playbook_service import PlaybookService
+from app.services.telegram_service import TelegramService
 
 logger = logging.getLogger(__name__)
 
 class LogAnalysisService:
     def __init__(self):
+        self.es_client = Elasticsearch(settings.ELASTICSEARCH_URL)
+        self.ai_service = QwenService()
+        self.playbook_service = PlaybookService()
+        self.telegram_service = TelegramService()
+
+    def get_logs(self, index: str, minutes_ago: int, query: dict) -> list:
+        '''Получает логи из Elasticsearch за указанный период.'''
         try:
-            self.es = Elasticsearch(
-                hosts=[settings.ELASTICSEARCH_URL],
-                # http_auth=('user', 'secret'), # Если требуется аутентификация
-            )
-            if not self.es.ping():
-                raise ConnectionError("Не удалось подключиться к Elasticsearch")
-            logger.info("Успешное подключение к Elasticsearch")
-        except Exception as e:
-            logger.error(f"Ошибка подключения к Elasticsearch: {e}")
-            self.es = None
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(minutes=minutes_ago)
 
-        self.ai_service = AIService()
-
-    def get_logs(self, index: str, minutes_ago: int = 60, query: dict = None) -> list:
-        '''
-        Получает логи из Elasticsearch за указанный промежуток времени.
-
-        :param index: Индекс Elasticsearch для поиска.
-        :param minutes_ago: Временной интервал в минутах для поиска логов.
-        :param query: Дополнительные параметры запроса (например, для фильтрации).
-        :return: Список записей логов.
-        '''
-        if not self.es:
-            logger.error("Нет подключения к Elasticsearch.")
-            return []
-
-        end_time = datetime.utcnow()
-        start_time = end_time - timedelta(minutes=minutes_ago)
-
-        default_query = {
-            "bool": {
-                "must": [
-                    {
-                        "range": {
-                            "@timestamp": {
-                                "gte": start_time.isoformat(),
-                                "lte": end_time.isoformat()
+            search_body = {
+                "query": {
+                    "bool": {
+                        "must": [
+                            query,
+                            {
+                                "range": {
+                                    "@timestamp": {
+                                        "gte": start_time.isoformat(),
+                                        "lt": end_time.isoformat()
+                                    }
+                                }
                             }
-                        }
+                        ]
                     }
-                ]
+                },
+                "size": 100, # Ограничиваем количество логов для анализа
+                "sort": [{"@timestamp": "desc"}]
             }
-        }
 
-        if query:
-            default_query["bool"]["must"].append(query)
-
-        try:
-            response = self.es.search(
-                index=index,
-                body={"query": default_query, "size": 1000} # Ограничиваем количество логов
-            )
+            response = self.es_client.search(index=index, body=search_body)
             return [hit['_source'] for hit in response['hits']['hits']]
         except Exception as e:
-            logger.error(f"Ошибка при поиске логов в Elasticsearch: {e}")
+            logger.error(f"Ошибка получения логов из Elasticsearch: {e}")
             return []
 
-    def analyze_and_generate_playbook(self, service_name: str):
+    async def analyze_and_propose_remediation(self, service_name: str, device_type: str):
         '''
-        Основной метод для анализа логов и генерации плейбука.
-
-        1. Получает логи для указанного сервиса.
-        2. Агрегирует и подготавливает их для AI.
-        3. Отправляет в AI-сервис для анализа и получения плейбука.
-        4. Возвращает сгенерированный плейбук.
+        Анализирует логи, генерирует плейбук и отправляет запрос на утверждение.
         '''
-        # Пример: ищем логи с уровнем "error" для конкретного сервиса
+        logger.info(f"Запуск анализа логов для сервиса: {service_name}")
+        
+        # 1. Получаем логи с ошибками
         logs = self.get_logs(
-            index=f"{service_name}-logs-*", # Пример индекса
-            minutes_ago=30,
-            query={"match": {"log.level": "error"}}
+            index=f"{service_name}-logs-*",
+            minutes_ago=60, # Анализируем за последний час
+            query={"match": {"log.level": "error"}} # Пример запроса
         )
 
         if not logs:
-            logger.info(f"Не найдено ошибок в логах для сервиса '{service_name}' за последние 30 минут.")
-            return None
+            logger.info(f"Критических ошибок для '{service_name}' не найдено.")
+            return
 
-        # Подготовка контекста для AI
-        log_summary = "\n".join([log.get('message', '') for log in logs])
-        context = f"Обнаружены следующие ошибки в логах сервиса '{service_name}':\n\n{log_summary}"
+        # 2. Формируем контекст для AI
+        log_summary = "\n".join([log.get('message', '') for log in logs[:10]]) # Берем последние 10 ошибок
+        log_snippet = "\n".join([log.get('message', '') for log in logs[:5]]) # Фрагмент для Telegram
 
-        logger.info(f"Отправка {len(logs)} записей логов в AI для анализа...")
+        context = f"Проанализируй следующие ошибки из логов сервиса '{service_name}' и определи основную проблему:\n\n{log_summary}"
 
-        # Генерация плейбука
-        playbook = self.ai_service.generate_playbook_from_logs(context, service_name)
+        # 3. Получаем анализ от AI
+        problem_description = self.ai_service.interpret_command(context)
 
-        if playbook:
-            logger.info(f"AI сгенерировал плейбук для исправления проблемы в '{service_name}'.")
-            return playbook
-        else:
-            logger.warning(f"AI не смог сгенерировать плейбук для '{service_name}'.")
-            return None
+        if not problem_description or "нет явных проблем" in problem_description.lower():
+            logger.info("AI не обнаружил конкретной проблемы для исправления.")
+            return
 
-# Пример использования
-if __name__ == '__main__':
-    # Этот код выполнится только при прямом запуске файла
-    # Требует, чтобы переменные окружения были установлены
+        # 4. Генерируем плейбук
+        playbook_path = self.playbook_service.generate_playbook(problem_description, device_type)
+
+        if not playbook_path:
+            logger.warning("Не удалось сгенерировать плейбук для обнаруженной проблемы.")
+            return
+
+        # 5. Отправляем запрос на утверждение в Telegram
+        logger.info(f"Отправка запроса на утверждение для плейбука: {playbook_path}")
+        await self.telegram_service.send_approval_request(
+            chat_id=settings.admin_chat_id,
+            problem_description=problem_description,
+            log_snippet=log_snippet,
+            playbook_path=playbook_path
+        )
+
+# Пример использования (для запуска из cron или другого планировщика)
+async def main():
     log_analyzer = LogAnalysisService()
     
-    # Пример анализа логов для сервиса 'auth-service'
-    # В реальном приложении это будет вызываться из API эндпоинта
-    playbook_result = log_analyzer.analyze_and_generate_playbook("auth-service")
+    # Анализ логов для разных систем
+    await log_analyzer.analyze_and_propose_remediation(service_name="mikrotik", device_type="mikrotik")
+    await log_analyzer.analyze_and_propose_remediation(service_name="unifi", device_type="unifi")
+    # Для Proxmox можно добавить аналогичный вызов, если настроен сбор логов в ES
+    # await log_analyzer.analyze_and_propose_remediation(service_name="proxmox", device_type="proxmox")
 
-    if playbook_result:
-        print("--- Сгенерированный Плейбук ---")
-        print(playbook_result)
-    else:
-        print("--- Плейбук не был сгенерирован ---")
+if __name__ == '__main__':
+    import asyncio
+    # Убедитесь, что у вас есть запущенный event loop
+    asyncio.run(main())
