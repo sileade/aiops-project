@@ -10,6 +10,7 @@
 GREEN  := \033[0;32m
 YELLOW := \033[0;33m
 RED    := \033[0;31m
+CYAN   := \033[0;36m
 NC     := \033[0m # No Color
 
 # Переменные
@@ -30,7 +31,7 @@ help: ## Показать справку
 	@echo "  make down     - Остановить все сервисы"
 	@echo ""
 	@echo "$(YELLOW)Доступные команды:$(NC)"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-15s$(NC) %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-18s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 
 # =============================================================================
@@ -116,6 +117,9 @@ logs-api: ## Показать логи API
 logs-bot: ## Показать логи Telegram бота
 	$(DOCKER_COMPOSE) logs -f bot
 
+logs-n8n: ## Показать логи n8n
+	$(DOCKER_COMPOSE) logs -f n8n
+
 logs-tail: ## Показать последние 100 строк логов
 	$(DOCKER_COMPOSE) logs --tail=100
 
@@ -135,20 +139,24 @@ test-cov: ## Запустить тесты с покрытием
 	@echo "$(GREEN)🧪 Запуск тестов с покрытием...$(NC)"
 	python3 -m pytest tests/ -v --cov=app --cov-report=html --cov-report=term-missing
 
+test-all: ## Запустить все тесты (unit + integration)
+	@echo "$(GREEN)🧪 Запуск всех тестов...$(NC)"
+	python3 -m pytest tests/ -v --tb=short
+
 lint: ## Проверить код линтером
 	@echo "$(GREEN)🔍 Проверка кода...$(NC)"
-	ruff check app/ tests/
+	ruff check app/ tests/ bot/
 
 lint-fix: ## Исправить ошибки линтера
 	@echo "$(GREEN)🔧 Исправление ошибок линтера...$(NC)"
-	ruff check app/ tests/ --fix
+	ruff check app/ tests/ bot/ --fix
 
 format: ## Форматировать код
 	@echo "$(GREEN)🎨 Форматирование кода...$(NC)"
-	black app/ tests/ --line-length 120
+	black app/ tests/ bot/ --line-length 120
 
 format-check: ## Проверить форматирование
-	black app/ tests/ --check --diff --line-length 120
+	black app/ tests/ bot/ --check --diff --line-length 120
 
 # =============================================================================
 # BUILD & DEPLOY
@@ -178,6 +186,9 @@ shell-redis: ## Открыть Redis CLI
 
 shell-es: ## Открыть shell в Elasticsearch
 	$(DOCKER_COMPOSE) exec elasticsearch /bin/bash
+
+shell-n8n: ## Открыть shell в n8n
+	$(DOCKER_COMPOSE) exec n8n /bin/sh
 
 # =============================================================================
 # CLEANUP
@@ -211,7 +222,7 @@ prod: up-build ## Собрать и запустить для production
 quick-test: lint test ## Быстрая проверка (линт + тесты)
 
 # =============================================================================
-# PROFILE COMMANDS (Ollama, Full)
+# PROFILE COMMANDS (Ollama, n8n, Full)
 # =============================================================================
 
 up-ollama: ## Запустить с локальной LLM (Ollama)
@@ -222,7 +233,15 @@ up-ollama: ## Запустить с локальной LLM (Ollama)
 	@echo "$(YELLOW)📝 Для загрузки модели выполните:$(NC)"
 	@echo "   docker exec -it aiops-ollama ollama pull llama3.2"
 
-up-full: ## Запустить полную версию (Ollama + Milvus)
+up-n8n: ## Запустить с n8n автоматизацией
+	@echo "$(GREEN)⚡ Запуск AIOps Platform с n8n...$(NC)"
+	$(DOCKER_COMPOSE) --profile n8n up -d
+	@echo ""
+	@make status
+	@echo "$(YELLOW)📝 n8n доступен по адресу: http://localhost:5678$(NC)"
+	@echo "   Логин: admin / aiops123 (по умолчанию)"
+
+up-full: ## Запустить полную версию (Ollama + Milvus + n8n)
 	@echo "$(GREEN)🚀 Запуск AIOps Platform (Full)...$(NC)"
 	$(DOCKER_COMPOSE) --profile full up -d --build
 	@echo ""
@@ -248,6 +267,9 @@ up-full-open: ## Запустить полную версию и открыть 
 
 down-ollama: ## Остановить сервисы с профилем Ollama
 	$(DOCKER_COMPOSE) --profile ollama down
+
+down-n8n: ## Остановить сервисы с профилем n8n
+	$(DOCKER_COMPOSE) --profile n8n down
 
 down-full: ## Остановить сервисы с профилем Full
 	$(DOCKER_COMPOSE) --profile full down
@@ -292,12 +314,26 @@ open-prometheus: ## Открыть Prometheus в браузере
 		echo "$(YELLOW)Откройте в браузере: http://localhost:9090$(NC)"; \
 	fi
 
+open-n8n: ## Открыть n8n в браузере
+	@echo "$(GREEN)⚡ Открытие n8n...$(NC)"
+	@if command -v xdg-open > /dev/null; then \
+		xdg-open http://localhost:5678; \
+	elif command -v open > /dev/null; then \
+		open http://localhost:5678; \
+	elif command -v start > /dev/null; then \
+		start http://localhost:5678; \
+	else \
+		echo "$(YELLOW)Откройте в браузере: http://localhost:5678$(NC)"; \
+	fi
+
 open-all: ## Открыть все веб-интерфейсы
 	@make open-docs
 	@sleep 1
 	@make open-grafana
 	@sleep 1
 	@make open-prometheus
+	@sleep 1
+	@make open-n8n
 
 # =============================================================================
 # OLLAMA COMMANDS
@@ -317,9 +353,9 @@ ollama-run: ## Запустить интерактивный чат с Ollama
 # UTILITY COMMANDS
 # =============================================================================
 
-wait-api: ## Ожидать готовности API (макс 30 сек)
+wait-api: ## Ожидать готовности API (макс 60 сек)
 	@echo "$(YELLOW)⏳ Ожидание готовности API...$(NC)"
-	@for i in $$(seq 1 30); do \
+	@for i in $$(seq 1 60); do \
 		if curl -s http://localhost:8000/health > /dev/null 2>&1; then \
 			echo "$(GREEN)✓ API готов за $$i сек$(NC)"; \
 			exit 0; \
@@ -328,7 +364,8 @@ wait-api: ## Ожидать готовности API (макс 30 сек)
 		sleep 1; \
 	done; \
 	echo ""; \
-	echo "$(RED)⚠️ Таймаут ожидания API (30 сек). Проверьте логи: make logs-api$(NC)"
+	echo "$(RED)⚠️ Таймаут ожидания API (60 сек). Проверьте логи: make logs-api$(NC)"; \
+	exit 1
 
 wait-services: ## Ожидать готовности всех сервисов
 	@echo "$(YELLOW)⏳ Ожидание готовности сервисов...$(NC)"
@@ -349,3 +386,89 @@ wait-services: ## Ожидать готовности всех сервисов
 		sleep 1; \
 	done
 	@make wait-api
+
+# =============================================================================
+# CI/CD COMMANDS
+# =============================================================================
+
+ci-deploy-test: ## CI: Развернуть тестовое окружение
+	@echo "$(CYAN)🔄 CI: Развертывание тестового окружения...$(NC)"
+	$(DOCKER_COMPOSE) -f docker-compose.yml up -d --build redis elasticsearch
+	@make ci-health-check
+	@echo "$(GREEN)✓ Тестовое окружение развернуто$(NC)"
+
+ci-health-check: ## CI: Проверка здоровья сервисов
+	@echo "$(CYAN)🏥 CI: Проверка здоровья сервисов...$(NC)"
+	@for i in $$(seq 1 30); do \
+		if curl -s http://localhost:9200/_cluster/health > /dev/null 2>&1; then \
+			echo "$(GREEN)✓ Elasticsearch готов$(NC)"; \
+			break; \
+		fi; \
+		if [ $$i -eq 30 ]; then \
+			echo "$(RED)✗ Elasticsearch не отвечает$(NC)"; \
+			exit 1; \
+		fi; \
+		sleep 2; \
+	done
+	@for i in $$(seq 1 15); do \
+		if $(DOCKER_COMPOSE) exec -T redis redis-cli ping > /dev/null 2>&1; then \
+			echo "$(GREEN)✓ Redis готов$(NC)"; \
+			break; \
+		fi; \
+		if [ $$i -eq 15 ]; then \
+			echo "$(RED)✗ Redis не отвечает$(NC)"; \
+			exit 1; \
+		fi; \
+		sleep 1; \
+	done
+
+ci-smoke-test: ## CI: Smoke тесты
+	@echo "$(CYAN)💨 CI: Запуск smoke тестов...$(NC)"
+	python3 -m pytest tests/ -v -m "smoke" --tb=short -x || true
+	@echo "$(GREEN)✓ Smoke тесты завершены$(NC)"
+
+ci-e2e-test: ## CI: End-to-end тесты
+	@echo "$(CYAN)🔗 CI: Запуск E2E тестов...$(NC)"
+	$(DOCKER_COMPOSE) up -d --build
+	@make wait-api
+	python3 -m pytest tests/ -v -m "e2e" --tb=short || true
+	@echo "$(GREEN)✓ E2E тесты завершены$(NC)"
+
+ci-cleanup: ## CI: Очистка после тестов
+	@echo "$(CYAN)🧹 CI: Очистка тестового окружения...$(NC)"
+	$(DOCKER_COMPOSE) down -v --remove-orphans
+	docker system prune -f
+	@echo "$(GREEN)✓ Очистка завершена$(NC)"
+
+ci-full: ci-deploy-test ci-smoke-test ci-e2e-test ci-cleanup ## CI: Полный цикл тестирования
+
+# =============================================================================
+# N8N COMMANDS
+# =============================================================================
+
+n8n-import: ## Импортировать workflow в n8n
+	@echo "$(GREEN)📥 Импорт workflows в n8n...$(NC)"
+	@if [ -d "config/n8n/workflows" ]; then \
+		for f in config/n8n/workflows/*.json; do \
+			echo "Импорт: $$f"; \
+			curl -X POST http://localhost:5678/api/v1/workflows \
+				-H "Content-Type: application/json" \
+				-u admin:aiops123 \
+				-d @$$f 2>/dev/null || echo "Ошибка импорта $$f"; \
+		done; \
+	else \
+		echo "$(YELLOW)Директория config/n8n/workflows не найдена$(NC)"; \
+	fi
+
+n8n-export: ## Экспортировать workflows из n8n
+	@echo "$(GREEN)📤 Экспорт workflows из n8n...$(NC)"
+	@mkdir -p config/n8n/workflows
+	curl -s http://localhost:5678/api/v1/workflows \
+		-u admin:aiops123 | python3 -m json.tool > config/n8n/workflows/exported.json
+	@echo "$(GREEN)✓ Workflows экспортированы в config/n8n/workflows/exported.json$(NC)"
+
+n8n-test-webhook: ## Тестировать webhook n8n
+	@echo "$(GREEN)🧪 Тестирование webhook n8n...$(NC)"
+	curl -X POST http://localhost:8000/api/v1/n8n/webhook/command \
+		-H "Content-Type: application/json" \
+		-d '{"command": "health_check", "target": "all"}' | python3 -m json.tool

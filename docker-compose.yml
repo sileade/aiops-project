@@ -8,7 +8,10 @@
 # С локальной LLM (Ollama):
 #   docker compose --profile ollama up -d
 #
-# Полная установка (с Milvus):
+# С n8n автоматизацией:
+#   docker compose --profile n8n up -d
+#
+# Полная установка (с Milvus, Ollama, n8n):
 #   docker compose --profile full up -d
 # =============================================================================
 
@@ -34,6 +37,8 @@ services:
       - PROMETHEUS_URL=http://prometheus:9090
       - ALERTMANAGER_URL=http://alertmanager:9093
       - OLLAMA_HOST=http://ollama:11434
+      - N8N_URL=http://n8n:5678
+      - N8N_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET:-aiops-webhook-secret}
     volumes:
       - ./playbooks:/app/playbooks:ro
       - ./config:/app/config:ro
@@ -178,6 +183,48 @@ services:
       - prometheus
 
   # ===========================================================================
+  # AUTOMATION - n8n (Optional - запуск с --profile n8n или --profile full)
+  # ===========================================================================
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: aiops-n8n
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
+      - NODE_ENV=production
+      - WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      - GENERIC_TIMEZONE=${TZ:-Europe/Moscow}
+      # Безопасность
+      - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH:-true}
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-aiops123}
+      # Интеграция с AIOps
+      - AIOPS_API_URL=http://api:8000
+      - AIOPS_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET:-aiops-webhook-secret}
+    volumes:
+      - n8n-data:/home/node/.n8n
+      - ./config/n8n:/home/node/n8n-config:ro
+    networks:
+      - aiops-network
+    profiles:
+      - n8n
+      - full
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ===========================================================================
   # AI/LLM - Ollama (Optional - запуск с --profile ollama)
   # ===========================================================================
 
@@ -258,6 +305,8 @@ volumes:
     name: aiops-ollama-data
   milvus-data:
     name: aiops-milvus-data
+  n8n-data:
+    name: aiops-n8n-data
   api-logs:
     name: aiops-api-logs
   bot-logs:

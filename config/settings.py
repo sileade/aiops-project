@@ -128,6 +128,12 @@ class Settings(BaseSettings):
     alertmanager_url: str = os.getenv("ALERTMANAGER_URL", "http://localhost:9093")
     alertmanager_webhook_enabled: bool = os.getenv("ALERTMANAGER_WEBHOOK_ENABLED", "true").lower() == "true"
     
+    # ==================== n8n Integration ====================
+    n8n_url: str = os.getenv("N8N_URL", "http://localhost:5678")
+    n8n_api_key: str = os.getenv("N8N_API_KEY", "")
+    n8n_webhook_secret: str = os.getenv("N8N_WEBHOOK_SECRET", "aiops-webhook-secret")
+    n8n_enabled: bool = os.getenv("N8N_ENABLED", "true").lower() == "true"
+    
     # ==================== Streaming ====================
     streaming_enabled: bool = os.getenv("STREAMING_ENABLED", "true").lower() == "true"
     streaming_batch_size: int = int(os.getenv("STREAMING_BATCH_SIZE", "100"))
