@@ -99,23 +99,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         logger.error(f"Ошибка при отправке решения в API: {e}")
         await query.edit_message_text(text=f"Не удалось связаться с API для обработки решения.")
 
-async def handle_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обрабатывает текстовые сообщения как команды для AI чат-бота."""
-    query = update.message.text
-    logger.info(f"Получено текстовое сообщение для AI чата: ‘{query}’")
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(f"{API_BASE_URL}/chat?query={query}") as response:
-                if response.status == 200:
-                    data = await response.json()
-                    await update.message.reply_text(data.get("response", "Не удалось получить ответ."))
-                else:
-                    await update.message.reply_text(f"Ошибка при обработке вашего запроса: {response.status}")
-    except Exception as e:
-        logger.error(f"Ошибка при вызове API чата: {e}")
-        await update.message.reply_text(f"Не удалось подключиться к API чата: {e}")
-
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик неизвестных команд."""
     await context.bot.send_message(chat_id=update.effective_chat.id, text="Извините, я не знаю такой команды.")
@@ -135,9 +118,6 @@ def main() -> None:
     application.add_handler(CommandHandler("status", get_status))
     application.add_handler(CommandHandler("analyze", analyze_service))
     application.add_handler(CallbackQueryHandler(handle_callback_query))
-        # Обработчик для текстовых сообщений (AI чат)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat))
-
     application.add_handler(MessageHandler(filters.COMMAND, unknown))
 
     logger.info("Telegram бот запускается...")

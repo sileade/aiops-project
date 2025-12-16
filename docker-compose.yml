@@ -19,7 +19,6 @@ services:
       - redis
       - elasticsearch
       - milvus
-      - ollama
 
   bot:
     build:
@@ -71,41 +70,25 @@ services:
       - "ETCD_DATA_DIR=/var/lib/milvus/etcd"
       - "COMMON_MINIO_BUCKET=milvus-bucket"
 
-  ollama:
-    image: ollama/ollama
-    container_name: aiops_ollama
-    restart: always
+  # Сервис для LLM (пример с TGI)
+  # Требует наличия NVIDIA GPU и nvidia-docker
+  llm:
+    image: ghcr.io/huggingface/text-generation-inference:1.4
+    container_name: aiops_llm
+    command: '--model-id deepseek-ai/DeepSeek-Coder-V2 --quantize bitsandbytes-nf4'
     ports:
-      - "11434:11434"
+      - "8080:80"
     volumes:
-      - ollama_data:/root/.ollama
-    # Раскомментируйте, если у вас есть NVIDIA GPU
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
-
-  n8n:
-    image: n8nio/n8n
-    container_name: aiops_n8n
-    restart: always
-    ports:
-      - "5678:5678"
-    environment:
-      - N8N_HOST=${N8N_DOMAIN}
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - NODE_ENV=production
-      - WEBHOOK_URL=http://${N8N_DOMAIN}:5678/
-    volumes:
-      - n8n_data:/home/node/.n8n
+      - ./data/huggingface:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
 volumes:
   redis_data:
   es_data:
   milvus_data:
-  ollama_data:
-  n8n_data:

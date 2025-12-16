@@ -1,0 +1,38 @@
+graph TD
+    subgraph "Пользователь"
+        A[Telegram-бот] --> B{/analyze service_name};
+    end
+
+    subgraph "AIOps Система (Docker)"
+        B --> C[FastAPI: /analyze];
+        C --> D[AnalysisService: trigger_full_analysis];
+        D --> E[Сбор данных];
+        E --> F[Prometheus: Метрики];
+        E --> G[Elasticsearch: Логи];
+        
+        subgraph "AI Ядро"
+            H[Данные] --> I(LLM Модель);
+            I --> J{Анализ причин};
+            J --> K[Генерация Ansible Playbook];
+        end
+
+        D --> H;
+        K --> L[Создание плана исправления];
+        L --> M{Отправка на утверждение};
+        M --> A;
+    end
+
+    subgraph "Утверждение"
+        A --> N{Утвердить / Отклонить};
+        N --> O[FastAPI: /approve];
+        O --> P[AutomationService: run_playbook];
+    end
+
+    subgraph "Инфраструктура"
+        P --> Q[Ansible];
+        Q --> R(Целевой сервер/сервис);
+    end
+
+    style A fill:#2AABEE,stroke:#2AABEE,stroke-width:2px,color:#fff
+    style R fill:#f9f,stroke:#333,stroke-width:2px
+    style I fill:#FFC300,stroke:#333,stroke-width:2px

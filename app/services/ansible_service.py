@@ -3,17 +3,27 @@
 import logging
 import os
 import subprocess
+import tempfile
 from typing import Tuple
 
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+
 class AnsibleService:
     def __init__(self):
-        self.playbooks_dir = settings.PLAYBOOKS_DIR
-        self.inventory_dir = os.path.join(os.path.dirname(self.playbooks_dir), 'inventory')
-        os.makedirs(self.inventory_dir, exist_ok=True)
+        # Используем безопасные пути с fallback
+        self.playbooks_dir = os.getenv("ANSIBLE_PLAYBOOK_DIR", settings.PLAYBOOKS_DIR)
+        
+        # Пробуем создать директорию для inventory, если не получается - используем temp
+        try:
+            self.inventory_dir = os.path.join(os.path.dirname(self.playbooks_dir), 'inventory')
+            os.makedirs(self.inventory_dir, exist_ok=True)
+        except (PermissionError, OSError):
+            # Fallback на временную директорию
+            self.inventory_dir = tempfile.mkdtemp(prefix="ansible_inventory_")
+            logger.warning(f"Используется временная директория для inventory: {self.inventory_dir}")
 
     def run_playbook(self, playbook_path: str, device_type: str, device_host: str) -> Tuple[bool, str]:
         """
@@ -32,17 +42,33 @@ class AnsibleService:
         # Создание временного inventory файла
         inventory_content = self._create_inventory(device_type, device_host)
         inventory_path = os.path.join(self.inventory_dir, f"hosts_{device_host}.ini")
-        with open(inventory_path, "w") as f:
-            f.write(inventory_content)
+        
+        try:
+            with open(inventory_path, "w") as f:
+                f.write(inventory_content)
+        except (PermissionError, OSError) as e:
+            # Fallback на временный файл
+            fd, inventory_path = tempfile.mkstemp(suffix=".ini", prefix="inventory_")
+            with os.fdopen(fd, 'w') as f:
+                f.write(inventory_content)
+
+        # Получаем учетные данные безопасно
+        mikrotik_user = getattr(settings, 'mikrotik_user', '') or getattr(settings, 'MIKROTIK_USER', 'admin')
+        mikrotik_password = getattr(settings, 'mikrotik_password', '') or getattr(settings, 'MIKROTIK_PASSWORD', '')
+        unifi_user = getattr(settings, 'unifi_user', '') or getattr(settings, 'UNIFI_USER', 'admin')
+        unifi_password = getattr(settings, 'unifi_password', '') or getattr(settings, 'UNIFI_PASSWORD', '')
 
         command = [
             "ansible-playbook",
             "-i", inventory_path,
             playbook_path,
-            "-e", f"ansible_user={settings.MIKROTIK_USER if device_type == 'mikrotik' else settings.UNIFI_USER}",
-            "-e", f"ansible_password={settings.MIKROTIK_PASSWORD if device_type == 'mikrotik' else settings.UNIFI_PASSWORD}",
-            "-e", f"ansible_network_os=community.routeros.routeros" if device_type == 'mikrotik' else "",
+            "-e", f"ansible_user={mikrotik_user if device_type == 'mikrotik' else unifi_user}",
+            "-e", f"ansible_password={mikrotik_password if device_type == 'mikrotik' else unifi_password}",
         ]
+        
+        if device_type == 'mikrotik':
+            command.extend(["-e", "ansible_network_os=community.routeros.routeros"])
+        
         # Удаляем пустые строки из команды
         command = [item for item in command if item]
 
@@ -52,8 +78,8 @@ class AnsibleService:
                 command,
                 capture_output=True,
                 text=True,
-                check=True, # Выбросит исключение, если команда завершится с ошибкой
-                timeout=300 # 5 минут таймаут
+                check=True,
+                timeout=300  # 5 минут таймаут
             )
             output = process.stdout
             logger.info(f"Плейбук успешно выполнен для {device_host}.\nВывод:\n{output}")
@@ -63,8 +89,12 @@ class AnsibleService:
             error_output = e.stderr or e.stdout
             logger.error(f"Ошибка выполнения плейбука для {device_host}.\nВывод:\n{error_output}")
             return False, error_output
-        except subprocess.TimeoutExpired as e:
+        except subprocess.TimeoutExpired:
             error_msg = f"Таймаут выполнения плейбука для {device_host}."
+            logger.error(error_msg)
+            return False, error_msg
+        except FileNotFoundError:
+            error_msg = "Ansible не установлен в системе. Установите: pip install ansible"
             logger.error(error_msg)
             return False, error_msg
         except Exception as e:
@@ -74,48 +104,20 @@ class AnsibleService:
         finally:
             # Удаление временного inventory файла
             if os.path.exists(inventory_path):
-                os.remove(inventory_path)
+                try:
+                    os.remove(inventory_path)
+                except OSError:
+                    pass
 
     def _create_inventory(self, device_type: str, device_host: str) -> str:
         """
         Создает содержимое inventory файла для Ansible.
         """
         if device_type == 'mikrotik':
-            return f"[mikrotik_devices]\n{device_host} ansible_host={device_host}"
+            return f"[mikrotik_devices]\n{device_host} ansible_host={device_host}\n"
         elif device_type == 'unifi':
-            # Для UniFi модулей часто требуется указывать контроллер, а не само устройство
-            return f"[unifi_controllers]\n{settings.UNIFI_HOST} ansible_host={settings.UNIFI_HOST}"
+            unifi_host = getattr(settings, 'unifi_host', '') or getattr(settings, 'UNIFI_HOST', device_host)
+            return f"[unifi_controllers]\n{unifi_host} ansible_host={unifi_host}\n"
         else:
-            raise ValueError("Неподдерживаемый тип устройства")
-
-# Пример использования
-if __name__ == '__main__':
-    # Предполагается, что плейбук уже сгенерирован
-    # Создадим фейковый плейбук для теста
-    playbook_content_mikrotik = """
----
-- name: Test MikroTik Connection
-  hosts: all
-  gather_facts: no
-  tasks:
-    - name: Ping MikroTik device
-      community.routeros.command:
-        commands: /ping 8.8.8.8 count=1
-"""
-    playbook_path_test = "/home/ubuntu/aiops_project/data/playbooks/test_playbook.yml"
-    with open(playbook_path_test, "w") as f:
-        f.write(playbook_content_mikrotik)
-
-    ansible_runner = AnsibleService()
-    
-    # Замените на реальный хост вашего MikroTik
-    mikrotik_host_test = settings.MIKROTIK_HOST
-
-    success, output_result = ansible_runner.run_playbook(playbook_path_test, 'mikrotik', mikrotik_host_test)
-
-    print(f"\n--- Результат выполнения плейбука ---")
-    print(f"Успех: {success}")
-    print(f"Вывод:\n{output_result}")
-
-    # Очистка
-    os.remove(playbook_path_test)
+            # Общий случай
+            return f"[all]\n{device_host} ansible_host={device_host}\n"

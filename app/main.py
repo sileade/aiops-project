@@ -1,3 +1,4 @@
+
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from typing import List
 
@@ -7,7 +8,7 @@ from app.models.schemas import (
     SystemStatus,
     RemediationPlan
 )
-from app.services import analysis_service, system_service, telegram_service, chatbot_service, orchestration_service
+from app.services import analysis_service, system_service, telegram_service
 from app.utils.logger import logger
 from config.settings import settings
 
@@ -51,29 +52,15 @@ async def analyze_service_endpoint(
     return {"status": "Analysis started in the background."}
 
 @app.post("/approve", tags=["Actions"])
-async def approve_remediation_plan(request: ApprovalRequest, background_tasks: BackgroundTasks):
+async def approve_remediation_plan(request: ApprovalRequest):
     """
     Утверждает или отклоняет план исправления.
     Вызывается из Telegram бота.
     """
     logger.info(f"Получено решение по плану {request.plan_id}: {'Утверждено' if request.approved else 'Отклонено'}")
     try:
-        if request.approved:
-            plan = await system_service.get_plan_from_db(request.plan_id)
-            await telegram_service.send_message(settings.admin_chat_id, "Действие утверждено! Запускаю полный цикл исправления...")
-            background_tasks.add_task(
-                orchestration_service.execute_and_verify_remediation,
-                playbook_name=plan.playbook_name,
-                device_type=plan.device_type,
-                device_host=plan.device_host,
-                original_problem=plan.problem_description,
-                original_log_query=plan.log_query
-            )
-            return {"status": "success", "message": "Remediation cycle started."}
-        else:
-            result = await analysis_service.process_approval(request.plan_id, False, request.reason)
-            return {"status": "success", "message": result}
-
+        result = await analysis_service.process_approval(request.plan_id, request.approved, request.reason)
+        return {"status": "success", "message": result}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -86,11 +73,3 @@ async def get_plan_by_id(plan_id: str):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-@app.post("/chat", tags=["Chat"])
-async def handle_chat_message(query: str):
-    """
-    Обрабатывает сообщение на естественном языке от пользователя.
-    """
-    logger.info(f"Получено сообщение в чат: ‘{query}’")
-    response = await chatbot_service.process_natural_language_command(query)
-    return {"response": response}
