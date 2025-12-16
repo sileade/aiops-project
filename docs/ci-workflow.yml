@@ -1,0 +1,63 @@
+# GitHub Actions CI/CD Pipeline
+# Copy this file to .github/workflows/ci.yml in your repository
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  lint:
+    name: 🔍 Lint & Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install ruff black
+      - run: ruff check . --output-format=github
+        continue-on-error: true
+      - run: black --check --diff .
+        continue-on-error: true
+
+  test:
+    name: 🧪 Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      - run: pip install -r requirements.txt pytest pytest-asyncio pytest-cov
+      - run: pytest tests/ -v -m "unit" --tb=short --cov=app
+        env:
+          REDIS_URL: redis://localhost:6379/0
+          OPENAI_API_KEY: test-key
+        continue-on-error: true
+
+  security:
+    name: 🔒 Security Scan
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install bandit safety
+      - run: bandit -r app/ -ll -ii -x tests/
+        continue-on-error: true
