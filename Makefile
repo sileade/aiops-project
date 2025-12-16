@@ -232,8 +232,7 @@ up-full-open: ## Запустить полную версию и открыть 
 	@echo "$(GREEN)🚀 Запуск AIOps Platform (Full) с открытием документации...$(NC)"
 	$(DOCKER_COMPOSE) --profile full up -d --build
 	@echo ""
-	@echo "$(YELLOW)⏳ Ожидание запуска API...$(NC)"
-	@sleep 10
+	@make wait-api
 	@echo "$(GREEN)🌐 Открытие документации API...$(NC)"
 	@if command -v xdg-open > /dev/null; then \
 		xdg-open http://localhost:8000/docs; \
@@ -313,3 +312,40 @@ ollama-list: ## Показать установленные модели Ollama
 
 ollama-run: ## Запустить интерактивный чат с Ollama
 	docker exec -it aiops-ollama ollama run llama3.2
+
+# =============================================================================
+# UTILITY COMMANDS
+# =============================================================================
+
+wait-api: ## Ожидать готовности API (макс 30 сек)
+	@echo "$(YELLOW)⏳ Ожидание готовности API...$(NC)"
+	@for i in $$(seq 1 30); do \
+		if curl -s http://localhost:8000/health > /dev/null 2>&1; then \
+			echo "$(GREEN)✓ API готов за $$i сек$(NC)"; \
+			exit 0; \
+		fi; \
+		printf "."; \
+		sleep 1; \
+	done; \
+	echo ""; \
+	echo "$(RED)⚠️ Таймаут ожидания API (30 сек). Проверьте логи: make logs-api$(NC)"
+
+wait-services: ## Ожидать готовности всех сервисов
+	@echo "$(YELLOW)⏳ Ожидание готовности сервисов...$(NC)"
+	@echo "Проверка Redis..."
+	@for i in $$(seq 1 15); do \
+		if $(DOCKER_COMPOSE) exec -T redis redis-cli ping > /dev/null 2>&1; then \
+			echo "$(GREEN)✓ Redis готов$(NC)"; \
+			break; \
+		fi; \
+		sleep 1; \
+	done
+	@echo "Проверка Elasticsearch..."
+	@for i in $$(seq 1 30); do \
+		if curl -s http://localhost:9200/_cluster/health > /dev/null 2>&1; then \
+			echo "$(GREEN)✓ Elasticsearch готов$(NC)"; \
+			break; \
+		fi; \
+		sleep 1; \
+	done
+	@make wait-api
