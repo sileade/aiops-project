@@ -37,20 +37,39 @@ class Settings(BaseSettings):
         "REDIS_URL",
         f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}"
     )
+    # Redis databases for different purposes
+    redis_cache_db: int = int(os.getenv("REDIS_CACHE_DB", "1"))
+    redis_streams_db: int = int(os.getenv("REDIS_STREAMS_DB", "2"))
+    redis_notifications_db: int = int(os.getenv("REDIS_NOTIFICATIONS_DB", "3"))
     
     # ==================== Milvus ====================
     milvus_host: str = os.getenv("MILVUS_HOST", "localhost")
     milvus_port: int = int(os.getenv("MILVUS_PORT", "19530"))
     
     # ==================== AI / LLM ====================
-    # OpenAI-совместимый API (поддерживает OpenAI, Azure, локальные модели)
+    # Primary: OpenAI-совместимый API
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_base_url: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     llm_model: str = os.getenv("LLM_MODEL", "gpt-4.1-mini")
     
+    # Fallback: Ollama (локальная LLM)
+    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    ollama_model: str = os.getenv("OLLAMA_MODEL", "llama3.2")
+    ollama_enabled: bool = os.getenv("OLLAMA_ENABLED", "true").lower() == "true"
+    
+    # Cache TTLs (seconds)
+    cache_ttl_analysis: int = int(os.getenv("CACHE_TTL_ANALYSIS", "600"))
+    cache_ttl_playbook: int = int(os.getenv("CACHE_TTL_PLAYBOOK", "1800"))
+    cache_ttl_nl: int = int(os.getenv("CACHE_TTL_NL", "300"))
+    
     # Legacy endpoints (для обратной совместимости)
     llm_endpoint: str = os.getenv("LLM_ENDPOINT", "http://localhost:8080")
     chronos_endpoint: str = os.getenv("CHRONOS_ENDPOINT", "http://localhost:8081")
+    
+    # ==================== Circuit Breaker ====================
+    circuit_breaker_failure_threshold: int = int(os.getenv("CB_FAILURE_THRESHOLD", "5"))
+    circuit_breaker_timeout: int = int(os.getenv("CB_TIMEOUT", "60"))
+    circuit_breaker_success_threshold: int = int(os.getenv("CB_SUCCESS_THRESHOLD", "2"))
     
     # ==================== Proxmox ====================
     proxmox_host: str = os.getenv("PROXMOX_HOST", "")
@@ -80,12 +99,39 @@ class Settings(BaseSettings):
     # ==================== Ansible ====================
     ansible_inventory_path: str = os.getenv("ANSIBLE_INVENTORY_PATH", "/etc/ansible/hosts")
     ansible_playbook_dir: str = os.getenv("ANSIBLE_PLAYBOOK_DIR", "/app/data/playbooks")
-    
-    # Алиас для обратной совместимости
     PLAYBOOKS_DIR: str = os.getenv("ANSIBLE_PLAYBOOK_DIR", "/app/data/playbooks")
     
     # ==================== Database ====================
     database_url: str = os.getenv("DATABASE_URL", "sqlite:///./aiops.db")
+    
+    # ==================== Notifications ====================
+    # Email (SMTP)
+    smtp_host: str = os.getenv("SMTP_HOST", "")
+    smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user: str = os.getenv("SMTP_USER", "")
+    smtp_password: str = os.getenv("SMTP_PASSWORD", "")
+    email_from: str = os.getenv("EMAIL_FROM", "")
+    email_to: str = os.getenv("EMAIL_TO", "")
+    
+    # Slack
+    slack_webhook_url: str = os.getenv("SLACK_WEBHOOK_URL", "")
+    slack_channel: str = os.getenv("SLACK_CHANNEL", "#alerts")
+    
+    # PagerDuty
+    pagerduty_routing_key: str = os.getenv("PAGERDUTY_ROUTING_KEY", "")
+    pagerduty_service_id: str = os.getenv("PAGERDUTY_SERVICE_ID", "")
+    
+    # Custom Webhook
+    custom_webhook_url: str = os.getenv("CUSTOM_WEBHOOK_URL", "")
+    
+    # ==================== Alertmanager ====================
+    alertmanager_url: str = os.getenv("ALERTMANAGER_URL", "http://localhost:9093")
+    alertmanager_webhook_enabled: bool = os.getenv("ALERTMANAGER_WEBHOOK_ENABLED", "true").lower() == "true"
+    
+    # ==================== Streaming ====================
+    streaming_enabled: bool = os.getenv("STREAMING_ENABLED", "true").lower() == "true"
+    streaming_batch_size: int = int(os.getenv("STREAMING_BATCH_SIZE", "100"))
+    streaming_flush_interval: int = int(os.getenv("STREAMING_FLUSH_INTERVAL", "5"))
     
     # ==================== System ====================
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
@@ -94,11 +140,14 @@ class Settings(BaseSettings):
     # ==================== Feature Flags ====================
     enable_auto_remediation: bool = os.getenv("ENABLE_AUTO_REMEDIATION", "false").lower() == "true"
     enable_chatbot_nl: bool = os.getenv("ENABLE_CHATBOT_NL", "true").lower() == "true"
+    enable_llm_fallback: bool = os.getenv("ENABLE_LLM_FALLBACK", "true").lower() == "true"
+    enable_caching: bool = os.getenv("ENABLE_CACHING", "true").lower() == "true"
+    enable_notifications: bool = os.getenv("ENABLE_NOTIFICATIONS", "true").lower() == "true"
     
     class Config:
         env_file = ".env"
         case_sensitive = False
-        extra = "ignore"  # Игнорировать неизвестные поля
+        extra = "ignore"
 
 
 # Глобальный экземпляр настроек

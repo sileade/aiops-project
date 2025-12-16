@@ -15,7 +15,7 @@ requests==2.31.0
 openai>=1.0.0
 
 # Data Storage
-elasticsearch==8.11.0
+elasticsearch[async]==8.11.0
 redis==5.0.1
 sqlalchemy==2.0.23
 psycopg2-binary==2.9.9
@@ -44,3 +44,9 @@ proxmoxer==2.0.1
 
 # Utilities
 python-dateutil==2.8.2
+
+# Email (for notifications)
+aiosmtplib==3.0.1
+
+# Async utilities
+asyncio-throttle==1.0.2

@@ -1,6 +1,8 @@
 version: '3.8'
 
 services:
+  # ==================== Core Services ====================
+  
   api:
     build:
       context: .
@@ -15,10 +17,20 @@ services:
       - ./data/playbooks:/app/data/playbooks
     env_file:
       - .env
+    environment:
+      - REDIS_HOST=redis
+      - ELASTICSEARCH_HOST=elasticsearch
+      - PROMETHEUS_URL=http://prometheus:9090
+      - ALERTMANAGER_URL=http://alertmanager:9093
+      - OLLAMA_BASE_URL=http://ollama:11434/v1
     depends_on:
       - redis
       - elasticsearch
-      - milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   bot:
     build:
@@ -31,9 +43,15 @@ services:
       - .:/app
     env_file:
       - .env
+    environment:
+      - REDIS_HOST=redis
+      - API_URL=http://api:8000
     depends_on:
       - api
+      - redis
 
+  # ==================== Data Storage ====================
+  
   redis:
     image: redis:7-alpine
     container_name: aiops_redis
@@ -42,6 +60,12 @@ services:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   elasticsearch:
     image: elasticsearch:8.11.3
@@ -55,7 +79,80 @@ services:
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     volumes:
       - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q 'green\\|yellow'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
+  # ==================== Monitoring ====================
+  
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: aiops_prometheus
+    restart: always
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: aiops_alertmanager
+    restart: always
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
+    volumes:
+      - ./config/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ==================== AI / LLM ====================
+  
+  # Ollama - локальная LLM (fallback)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: aiops_ollama
+    restart: always
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    # Раскомментируйте для GPU поддержки
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ==================== Vector Database ====================
+  
   milvus:
     image: milvusdb/milvus:v2.3.3-standalone
     container_name: aiops_milvus
@@ -69,12 +166,15 @@ services:
       - "ETCD_USE_EMBED=true"
       - "ETCD_DATA_DIR=/var/lib/milvus/etcd"
       - "COMMON_MINIO_BUCKET=milvus-bucket"
+    profiles:
+      - full  # Только при запуске с --profile full
 
-  # Сервис для LLM (пример с TGI)
-  # Требует наличия NVIDIA GPU и nvidia-docker
-  llm:
+  # ==================== GPU LLM (Optional) ====================
+  
+  # TGI - Text Generation Inference (требует NVIDIA GPU)
+  llm-tgi:
     image: ghcr.io/huggingface/text-generation-inference:1.4
-    container_name: aiops_llm
+    container_name: aiops_llm_tgi
     command: '--model-id deepseek-ai/DeepSeek-Coder-V2 --quantize bitsandbytes-nf4'
     ports:
       - "8080:80"
@@ -87,8 +187,36 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    profiles:
+      - gpu  # Только при запуске с --profile gpu
+
+  # ==================== Log Aggregation (Optional) ====================
+  
+  # Filebeat для сбора логов
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.11.3
+    container_name: aiops_filebeat
+    restart: always
+    user: root
+    volumes:
+      - ./config/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - ELASTICSEARCH_HOST=elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    profiles:
+      - logging  # Только при запуске с --profile logging
 
 volumes:
   redis_data:
   es_data:
+  prometheus_data:
+  alertmanager_data:
+  ollama_data:
   milvus_data:
+
+networks:
+  default:
+    name: aiops_network
