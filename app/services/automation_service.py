@@ -1,19 +1,20 @@
 """
 Сервис для выполнения Ansible плейбуков.
 """
-import tempfile
-import os
+
 import asyncio
 import datetime
+import os
 import subprocess
-from typing import Dict, Any, Optional
+import tempfile
+from typing import Any
 
-from app.models.schemas import RemediationPlan, ActionStatus
+from app.models.schemas import ActionStatus, RemediationPlan
 from app.utils.logger import logger
 from config.settings import settings
+
 from .system_service import save_plan_to_db
 from .telegram_service import send_message
-
 
 # Ленивый импорт ansible_runner (может быть не установлен)
 ansible_runner = None
@@ -25,6 +26,7 @@ def _get_ansible_runner():
     if ansible_runner is None:
         try:
             import ansible_runner as ar
+
             ansible_runner = ar
         except ImportError:
             logger.warning("ansible_runner не установлен. Будет использован subprocess fallback.")
@@ -34,20 +36,17 @@ def _get_ansible_runner():
 async def run_playbook_async(plan: RemediationPlan):
     """Асинхронно запускает Ansible плейбук в отдельном потоке."""
     loop = asyncio.get_running_loop()
-    
+
     plan.status = ActionStatus.EXECUTING
     plan.executed_at = datetime.datetime.now()
     await save_plan_to_db(plan)
-    
+
     try:
         # Запускаем синхронную функцию в отдельном потоке
         result = await loop.run_in_executor(
-            None, 
-            run_ansible_playbook, 
-            plan.playbook_yaml, 
-            settings.ansible_inventory_path
+            None, run_ansible_playbook, plan.playbook_yaml, settings.ansible_inventory_path
         )
-        
+
         if result["rc"] == 0:
             plan.status = ActionStatus.COMPLETED
             plan.execution_result = result["stdout"]
@@ -56,7 +55,7 @@ async def run_playbook_async(plan: RemediationPlan):
             logger.info(f"Плейбук для плана {plan.plan_id} успешно выполнен.")
         else:
             raise Exception(f"Ansible вернул код ошибки: {result['rc']}\n{result['stdout']}")
-            
+
     except Exception as e:
         logger.error(f"Ошибка выполнения плейбука для плана {plan.plan_id}: {e}")
         plan.status = ActionStatus.FAILED
@@ -65,7 +64,7 @@ async def run_playbook_async(plan: RemediationPlan):
         await send_message(f"❌ Ошибка выполнения плана *{plan.title}*:\n`{e}`")
 
 
-def run_ansible_playbook(playbook_content: str, inventory_path: str) -> Dict[str, Any]:
+def run_ansible_playbook(playbook_content: str, inventory_path: str) -> dict[str, Any]:
     """
     Синхронная функция для запуска Ansible плейбука.
     Поддерживает два режима: через ansible_runner или через subprocess.
@@ -75,10 +74,10 @@ def run_ansible_playbook(playbook_content: str, inventory_path: str) -> Dict[str
         os.makedirs(project_dir)
 
         playbook_path = os.path.join(project_dir, "playbook.yml")
-        
+
         with open(playbook_path, "w") as f:
             f.write(playbook_content)
-        
+
         # Проверяем/создаем inventory файл
         if not os.path.exists(inventory_path):
             logger.warning(f"Файл инвентаря не найден: {inventory_path}. Создаю локальный.")
@@ -87,28 +86,24 @@ def run_ansible_playbook(playbook_content: str, inventory_path: str) -> Dict[str
                 f.write("[all]\nlocalhost ansible_connection=local\n")
 
         logger.info(f"Запуск плейбука: {playbook_path} с инвентарем: {inventory_path}")
-        
+
         # Пробуем использовать ansible_runner
         runner = _get_ansible_runner()
-        
+
         if runner is not None:
             return _run_with_ansible_runner(runner, tmpdir, inventory_path)
         else:
             return _run_with_subprocess(playbook_path, inventory_path)
 
 
-def _run_with_ansible_runner(runner, tmpdir: str, inventory_path: str) -> Dict[str, Any]:
+def _run_with_ansible_runner(runner, tmpdir: str, inventory_path: str) -> dict[str, Any]:
     """Запуск через ansible_runner."""
-    result = runner.run(
-        private_data_dir=tmpdir,
-        playbook="playbook.yml",
-        inventory=inventory_path
-    )
-    
+    result = runner.run(private_data_dir=tmpdir, playbook="playbook.yml", inventory=inventory_path)
+
     stdout = ""
-    if hasattr(result, 'stdout') and result.stdout:
-        stdout = result.stdout.read() if hasattr(result.stdout, 'read') else str(result.stdout)
-    
+    if hasattr(result, "stdout") and result.stdout:
+        stdout = result.stdout.read() if hasattr(result.stdout, "read") else str(result.stdout)
+
     return {
         "status": result.status,
         "rc": result.rc if result.rc is not None else 1,
@@ -116,16 +111,16 @@ def _run_with_ansible_runner(runner, tmpdir: str, inventory_path: str) -> Dict[s
     }
 
 
-def _run_with_subprocess(playbook_path: str, inventory_path: str) -> Dict[str, Any]:
+def _run_with_subprocess(playbook_path: str, inventory_path: str) -> dict[str, Any]:
     """Fallback: запуск через subprocess."""
     try:
         result = subprocess.run(
             ["ansible-playbook", "-i", inventory_path, playbook_path],
             capture_output=True,
             text=True,
-            timeout=300  # 5 минут таймаут
+            timeout=300,  # 5 минут таймаут
         )
-        
+
         return {
             "status": "successful" if result.returncode == 0 else "failed",
             "rc": result.returncode,

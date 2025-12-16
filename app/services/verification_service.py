@@ -4,9 +4,11 @@
 
 import logging
 import time
-from app.services.log_analysis_service import LogAnalysisService # Используем его для повторной проверки логов
+
+from app.services.log_analysis_service import LogAnalysisService  # Используем его для повторной проверки логов
 
 logger = logging.getLogger(__name__)
+
 
 class VerificationService:
     def __init__(self):
@@ -30,8 +32,8 @@ class VerificationService:
             # Выполняем тот же самый запрос, который изначально нашел ошибку
             logs_after_fix = self.log_analyzer.get_logs(
                 index=f"{service_name}-logs-*",
-                minutes_ago=1, # Проверяем только за последнюю минуту
-                query=original_log_query
+                minutes_ago=1,  # Проверяем только за последнюю минуту
+                query=original_log_query,
             )
 
             if not logs_after_fix:
@@ -47,8 +49,9 @@ class VerificationService:
             logger.error(f"Ошибка во время верификации исправления: {e}")
             return False
 
+
 # Пример использования
-if __name__ == '__main__':
+if __name__ == "__main__":
     verifier = VerificationService()
 
     # Предположим, исходная проблема была обнаружена этим запросом

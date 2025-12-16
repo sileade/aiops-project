@@ -1,17 +1,19 @@
-'''
+"""
 Сервисный модуль для анализа логов из Elasticsearch и генерации плейбуков.
-'''
+"""
 
 import logging
-from elasticsearch import Elasticsearch
 from datetime import datetime, timedelta
 
-from config.settings import settings
-from app.services.qwen_service import QwenService
+from elasticsearch import Elasticsearch
+
 from app.services.playbook_service import PlaybookService
+from app.services.qwen_service import QwenService
 from app.services.telegram_service import TelegramService
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
+
 
 class LogAnalysisService:
     def __init__(self):
@@ -21,7 +23,7 @@ class LogAnalysisService:
         self.telegram_service = TelegramService()
 
     def get_logs(self, index: str, minutes_ago: int, query: dict) -> list:
-        '''Получает логи из Elasticsearch за указанный период.'''
+        """Получает логи из Elasticsearch за указанный период."""
         try:
             end_time = datetime.utcnow()
             start_time = end_time - timedelta(minutes=minutes_ago)
@@ -31,38 +33,31 @@ class LogAnalysisService:
                     "bool": {
                         "must": [
                             query,
-                            {
-                                "range": {
-                                    "@timestamp": {
-                                        "gte": start_time.isoformat(),
-                                        "lt": end_time.isoformat()
-                                    }
-                                }
-                            }
+                            {"range": {"@timestamp": {"gte": start_time.isoformat(), "lt": end_time.isoformat()}}},
                         ]
                     }
                 },
-                "size": 100, # Ограничиваем количество логов для анализа
-                "sort": [{"@timestamp": "desc"}]
+                "size": 100,  # Ограничиваем количество логов для анализа
+                "sort": [{"@timestamp": "desc"}],
             }
 
             response = self.es_client.search(index=index, body=search_body)
-            return [hit['_source'] for hit in response['hits']['hits']]
+            return [hit["_source"] for hit in response["hits"]["hits"]]
         except Exception as e:
             logger.error(f"Ошибка получения логов из Elasticsearch: {e}")
             return []
 
     async def analyze_and_propose_remediation(self, service_name: str, device_type: str):
-        '''
+        """
         Анализирует логи, генерирует плейбук и отправляет запрос на утверждение.
-        '''
+        """
         logger.info(f"Запуск анализа логов для сервиса: {service_name}")
-        
+
         # 1. Получаем логи с ошибками
         logs = self.get_logs(
             index=f"{service_name}-logs-*",
-            minutes_ago=60, # Анализируем за последний час
-            query={"match": {"log.level": "error"}} # Пример запроса
+            minutes_ago=60,  # Анализируем за последний час
+            query={"match": {"log.level": "error"}},  # Пример запроса
         )
 
         if not logs:
@@ -70,8 +65,8 @@ class LogAnalysisService:
             return
 
         # 2. Формируем контекст для AI
-        log_summary = "\n".join([log.get('message', '') for log in logs[:10]]) # Берем последние 10 ошибок
-        log_snippet = "\n".join([log.get('message', '') for log in logs[:5]]) # Фрагмент для Telegram
+        log_summary = "\n".join([log.get("message", "") for log in logs[:10]])  # Берем последние 10 ошибок
+        log_snippet = "\n".join([log.get("message", "") for log in logs[:5]])  # Фрагмент для Telegram
 
         context = f"Проанализируй следующие ошибки из логов сервиса '{service_name}' и определи основную проблему:\n\n{log_summary}"
 
@@ -95,20 +90,23 @@ class LogAnalysisService:
             chat_id=settings.admin_chat_id,
             problem_description=problem_description,
             log_snippet=log_snippet,
-            playbook_path=playbook_path
+            playbook_path=playbook_path,
         )
+
 
 # Пример использования (для запуска из cron или другого планировщика)
 async def main():
     log_analyzer = LogAnalysisService()
-    
+
     # Анализ логов для разных систем
     await log_analyzer.analyze_and_propose_remediation(service_name="mikrotik", device_type="mikrotik")
     await log_analyzer.analyze_and_propose_remediation(service_name="unifi", device_type="unifi")
     # Для Proxmox можно добавить аналогичный вызов, если настроен сбор логов в ES
     # await log_analyzer.analyze_and_propose_remediation(service_name="proxmox", device_type="proxmox")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     import asyncio
+
     # Убедитесь, что у вас есть запущенный event loop
     asyncio.run(main())

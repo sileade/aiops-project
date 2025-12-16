@@ -1,10 +1,14 @@
 """
 Сервис для взаимодействия с моделью Qwen для интерпретации команд.
 """
-import aiohttp
+
 import json
+
+import aiohttp
+
 from app.utils.logger import logger
 from config.settings import settings
+
 
 async def interpret_command(query: str) -> dict:
     """
@@ -35,10 +39,7 @@ async def interpret_command(query: str) -> dict:
 Запрос пользователя: "{query}"
 """
 
-    payload = {
-        "inputs": prompt,
-        "parameters": {"max_new_tokens": 256, "do_sample": False}
-    }
+    payload = {"inputs": prompt, "parameters": {"max_new_tokens": 256, "do_sample": False}}
 
     # Используем тот же эндпоинт, что и для других LLM, предполагая, что там развернута нужная модель
     try:
@@ -46,14 +47,14 @@ async def interpret_command(query: str) -> dict:
             async with session.post(settings.llm_endpoint, json=payload) as response:
                 if response.status == 200:
                     data = await response.json()
-                    json_response_str = data[0]['generated_text'][len(prompt):].strip()
+                    json_response_str = data[0]["generated_text"][len(prompt) :].strip()
                     try:
                         # Очистка от возможных артефактов
                         if json_response_str.startswith("```json"):
                             json_response_str = json_response_str[7:]
                         if json_response_str.endswith("```"):
                             json_response_str = json_response_str[:-3]
-                        
+
                         result_json = json.loads(json_response_str.strip())
                         logger.info(f"Qwen успешно интерпретировал команду: {result_json}")
                         return result_json

@@ -1,18 +1,17 @@
-
 import datetime
-from elasticsearch import AsyncElasticsearch
-import redis.asyncio as redis
-import aiohttp
 
-from app.models.schemas import SystemStatus, RemediationPlan, ActionStatus
+import aiohttp
+import redis.asyncio as redis
+from elasticsearch import AsyncElasticsearch
+
+from app.models.schemas import ActionStatus, RemediationPlan, SystemStatus
 from app.utils.logger import logger
 from config.settings import settings
 
 # Подключение к сервисам
-es_client = AsyncElasticsearch(
-    f"http://{settings.elasticsearch_host}:{settings.elasticsearch_port}"
-)
+es_client = AsyncElasticsearch(f"http://{settings.elasticsearch_host}:{settings.elasticsearch_port}")
 redis_client = redis.from_url(f"redis://{settings.redis_host}:{settings.redis_port}", decode_responses=True)
+
 
 async def get_elasticsearch_status() -> str:
     """Проверка статуса Elasticsearch."""
@@ -23,6 +22,7 @@ async def get_elasticsearch_status() -> str:
     except Exception as e:
         logger.error(f"Ошибка подключения к Elasticsearch: {e}")
         return "error"
+
 
 async def get_prometheus_status() -> str:
     """Проверка статуса Prometheus."""
@@ -36,6 +36,7 @@ async def get_prometheus_status() -> str:
         logger.error(f"Ошибка подключения к Prometheus: {e}")
         return "error"
 
+
 async def get_redis_status() -> str:
     """Проверка статуса Redis."""
     try:
@@ -46,16 +47,15 @@ async def get_redis_status() -> str:
         logger.error(f"Ошибка подключения к Redis: {e}")
         return "error"
 
+
 async def get_full_system_status() -> SystemStatus:
     """Собирает полный статус всех компонентов системы."""
     logger.info("Сбор полного статуса системы...")
-    
+
     es_status, prom_status, redis_status = await asyncio.gather(
-        get_elasticsearch_status(),
-        get_prometheus_status(),
-        get_redis_status()
+        get_elasticsearch_status(), get_prometheus_status(), get_redis_status()
     )
-    
+
     # Заглушки для количества действий и аномалий
     pending_actions = await redis_client.scard("pending_plans")
     recent_anomalies = await redis_client.zcard("anomalies", min=datetime.datetime.now().timestamp() - 3600, max="+inf")
@@ -67,16 +67,18 @@ async def get_full_system_status() -> SystemStatus:
         redis_status=redis_status,
         pending_actions=pending_actions,
         recent_anomalies=recent_anomalies,
-        timestamp=datetime.datetime.now()
+        timestamp=datetime.datetime.now(),
     )
+
 
 async def get_plan_from_db(plan_id: str) -> RemediationPlan:
     """Получение плана из Redis (заглушка)."""
     plan_data = await redis_client.hgetall(f"plan:{plan_id}")
     if not plan_data:
         raise ValueError(f"План с ID {plan_id} не найден.")
-    
+
     return RemediationPlan(**plan_data)
+
 
 async def save_plan_to_db(plan: RemediationPlan):
     """Сохранение плана в Redis."""

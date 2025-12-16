@@ -5,10 +5,11 @@ import os
 import uuid
 from datetime import datetime
 
-from config.settings import settings
 from app.services.qwen_service import QwenService
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
+
 
 class PlaybookService:
     def __init__(self):
@@ -52,10 +53,12 @@ class PlaybookService:
         """
         Создает промпт для модели Qwen для генерации плейбука.
         """
-        if device_type == 'mikrotik':
+        if device_type == "mikrotik":
             modules = "community.routeros.command, community.routeros.api"
-            example_task = "- name: Перезагрузить маршрутизатор\n  community.routeros.command:\n    commands: /system reboot"
-        elif device_type == 'unifi':
+            example_task = (
+                "- name: Перезагрузить маршрутизатор\n  community.routeros.command:\n    commands: /system reboot"
+            )
+        elif device_type == "unifi":
             modules = "community.unifi.unifi_device"
             example_task = "- name: Перезапустить точку доступа\n  community.unifi.unifi_device:\n    mac: '{{ device_mac }}'\n    state: restart"
         else:
@@ -85,23 +88,23 @@ class PlaybookService:
         """
         return prompt.strip()
 
+
 # Пример использования
-if __name__ == '__main__':
+if __name__ == "__main__":
     playbook_gen = PlaybookService()
-    
+
     # Пример 1: Проблема с MikroTik
     problem_mikrotik = "Пользователи жалуются на высокий пинг. Анализ показал, что firewall filter заблокировал легитимный трафик на порту 443. Нужно удалить правило, блокирующее порт 443."
-    playbook_path_mikrotik = playbook_gen.generate_playbook(problem_mikrotik, 'mikrotik')
+    playbook_path_mikrotik = playbook_gen.generate_playbook(problem_mikrotik, "mikrotik")
     if playbook_path_mikrotik:
         print(f"\n--- Плейбук для MikroTik ---\nПуть: {playbook_path_mikrotik}")
-        with open(playbook_path_mikrotik, 'r') as f:
+        with open(playbook_path_mikrotik) as f:
             print(f.read())
 
     # Пример 2: Проблема с UniFi
     problem_unifi = "Точка доступа 'AP-Lobby' зависла и не пропускает клиентов. Требуется ее перезагрузить. MAC-адрес точки: 'B4:FB:E4:XX:XX:XX'."
-    playbook_path_unifi = playbook_gen.generate_playbook(problem_unifi, 'unifi')
+    playbook_path_unifi = playbook_gen.generate_playbook(problem_unifi, "unifi")
     if playbook_path_unifi:
         print(f"\n--- Плейбук для UniFi ---\nПуть: {playbook_path_unifi}")
-        with open(playbook_path_unifi, 'r') as f:
+        with open(playbook_path_unifi) as f:
             print(f.read())
-

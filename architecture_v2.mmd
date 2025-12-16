@@ -1,0 +1,95 @@
+flowchart TB
+    subgraph User["👤 User Interface"]
+        TG[Telegram Bot]
+        API[REST API]
+    end
+
+    subgraph Core["🧠 Core Services"]
+        CB[Chatbot Service<br/>NL Processing]
+        AN[Analysis Service<br/>Parallel Data Collection]
+        AI[AI Service<br/>OpenAI + Ollama Fallback]
+        OR[Orchestration Service]
+        AU[Automation Service<br/>Ansible Runner]
+    end
+
+    subgraph Resilience["🛡️ Resilience Layer"]
+        CIRCUIT[Circuit Breaker<br/>OpenAI/Ollama/ES/Prometheus]
+        CACHE[Redis Cache<br/>AI Response Caching]
+        QUEUE[Notification Queue<br/>Persistent + Retry]
+    end
+
+    subgraph DataSources["📊 Data Sources"]
+        ES[Elasticsearch<br/>Logs]
+        PROM[Prometheus<br/>Metrics]
+        AM[Alertmanager<br/>Push Alerts]
+    end
+
+    subgraph Streaming["📡 Streaming"]
+        RS[Redis Streams<br/>Real-time Logs]
+        AD[Anomaly Detector<br/>Pattern Detection]
+    end
+
+    subgraph Notifications["📢 Multi-Channel Notifications"]
+        TEL[Telegram]
+        EMAIL[Email/SMTP]
+        SLACK[Slack]
+        PD[PagerDuty]
+    end
+
+    subgraph LLM["🤖 LLM Providers"]
+        OPENAI[OpenAI API<br/>Primary]
+        OLLAMA[Ollama<br/>Fallback]
+    end
+
+    subgraph Infra["🖥️ Infrastructure"]
+        PX[Proxmox VE]
+        MK[MikroTik]
+        ANSIBLE[Ansible<br/>Playbooks]
+    end
+
+    %% User flows
+    TG --> CB
+    API --> AN
+    AM -->|Webhook| API
+
+    %% Core processing
+    CB --> AI
+    AN --> AI
+    AN -->|asyncio.gather| ES
+    AN -->|asyncio.gather| PROM
+
+    %% AI with resilience
+    AI --> CIRCUIT
+    CIRCUIT --> OPENAI
+    CIRCUIT -->|Fallback| OLLAMA
+    AI --> CACHE
+
+    %% Streaming
+    RS --> AD
+    AD -->|Anomaly| AN
+
+    %% Orchestration
+    AI -->|Playbook| OR
+    OR --> AU
+    AU --> ANSIBLE
+    ANSIBLE --> PX
+    ANSIBLE --> MK
+
+    %% Notifications
+    AN --> QUEUE
+    OR --> QUEUE
+    QUEUE --> TEL
+    QUEUE --> EMAIL
+    QUEUE --> SLACK
+    QUEUE --> PD
+
+    %% Styling
+    classDef primary fill:#1e3a5f,stroke:#00d4ff,color:#fff
+    classDef resilience fill:#2d4a3e,stroke:#00ff88,color:#fff
+    classDef data fill:#4a3a2d,stroke:#ffaa00,color:#fff
+    classDef notify fill:#3a2d4a,stroke:#ff00ff,color:#fff
+
+    class TG,API,CB,AN,AI,OR,AU primary
+    class CIRCUIT,CACHE,QUEUE resilience
+    class ES,PROM,AM,RS data
+    class TEL,EMAIL,SLACK,PD notify

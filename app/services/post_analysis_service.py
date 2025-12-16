@@ -3,9 +3,11 @@
 """
 
 import logging
+
 from app.services.qwen_service import QwenService
 
 logger = logging.getLogger(__name__)
+
 
 class PostAnalysisService:
     def __init__(self):
@@ -34,17 +36,11 @@ class PostAnalysisService:
             else:
                 status = "UNCERTAIN"
 
-            return {
-                "status": status,
-                "reason": analysis_result
-            }
+            return {"status": status, "reason": analysis_result}
 
         except Exception as e:
             logger.error(f"Ошибка при анализе результатов выполнения: {e}")
-            return {
-                "status": "ERROR",
-                "reason": str(e)
-            }
+            return {"status": "ERROR", "reason": str(e)}
 
     def _create_analysis_prompt(self, playbook_output: str, original_problem: str) -> str:
         """
@@ -71,12 +67,13 @@ class PostAnalysisService:
         """
         return prompt.strip()
 
+
 # Пример использования
-if __name__ == '__main__':
+if __name__ == "__main__":
     post_analyzer = PostAnalysisService()
 
     problem = "Firewall заблокировал порт 443, нужно удалить правило"
-    
+
     # Пример 1: Успешное выполнение
     output_success = """
     PLAY RECAP *********************************************************************

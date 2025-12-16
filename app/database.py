@@ -10,9 +10,9 @@ from config.settings import settings
 
 # Создаем движок для подключения к базе данных
 engine = create_engine(
-    settings.DATABASE_URL, 
-    pool_pre_ping=True, # Проверяет соединение перед использованием
-    pool_recycle=3600    # Переподключается каждые 3600 секунд
+    settings.DATABASE_URL,
+    pool_pre_ping=True,  # Проверяет соединение перед использованием
+    pool_recycle=3600,  # Переподключается каждые 3600 секунд
 )
 
 # Создаем фабрику сессий
@@ -20,6 +20,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Базовый класс для всех моделей SQLAlchemy
 Base = declarative_base()
+
 
 # Функция для получения сессии базы данных
 def get_db():

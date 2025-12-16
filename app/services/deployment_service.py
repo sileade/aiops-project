@@ -1,5 +1,5 @@
-import os
 import subprocess
+
 
 class DeploymentService:
     """Сервис для автоматического развертывания и обновления"""
@@ -23,7 +23,4 @@ class DeploymentService:
         """Запускает полный цикл развертывания"""
         pull_result = self.pull_latest_changes()
         restart_result = self.restart_services()
-        return {
-            "pull_result": pull_result,
-            "restart_result": restart_result
-        }
+        return {"pull_result": pull_result, "restart_result": restart_result}

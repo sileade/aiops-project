@@ -2,14 +2,16 @@
 Модели SQLAlchemy для хранения истории циклов AIOps.
 """
 
-import uuid
-from sqlalchemy import Column, String, DateTime, JSON, ForeignKey, Enum as SQLAlchemyEnum
-from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import UUID
-from datetime import datetime
 import enum
+import uuid
+from datetime import datetime
+
+from sqlalchemy import JSON, Column, DateTime, Enum as SQLAlchemyEnum, ForeignKey, String
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
 from app.database import Base
+
 
 # --- Enums для статусов ---
 class CycleStatus(enum.Enum):
@@ -17,6 +19,7 @@ class CycleStatus(enum.Enum):
     SUCCESS = "SUCCESS"
     FAILURE = "FAILURE"
     REJECTED = "REJECTED"
+
 
 class StepName(enum.Enum):
     DETECTION = "DETECTION"
@@ -27,11 +30,13 @@ class StepName(enum.Enum):
     POST_ANALYSIS = "POST_ANALYSIS"
     VERIFICATION = "VERIFICATION"
 
+
 class StepStatus(enum.Enum):
     PENDING = "PENDING"
     SUCCESS = "SUCCESS"
     FAILURE = "FAILURE"
     SKIPPED = "SKIPPED"
+
 
 # --- Основная таблица: RemediationCycle ---
 class RemediationCycle(Base):
@@ -53,6 +58,7 @@ class RemediationCycle(Base):
     def __repr__(self):
         return f"<RemediationCycle(id={self.id}, status={self.status})>"
 
+
 # --- Таблица для шагов цикла: CycleStep ---
 class CycleStep(Base):
     __tablename__ = "cycle_steps"
@@ -63,7 +69,7 @@ class CycleStep(Base):
     start_time = Column(DateTime, default=datetime.utcnow)
     end_time = Column(DateTime, nullable=True)
     status = Column(SQLAlchemyEnum(StepStatus), default=StepStatus.PENDING)
-    details = Column(JSON, nullable=True) # Хранение любой дополнительной информации
+    details = Column(JSON, nullable=True)  # Хранение любой дополнительной информации
 
     # Связь с основным циклом
     cycle = relationship("RemediationCycle", back_populates="steps")

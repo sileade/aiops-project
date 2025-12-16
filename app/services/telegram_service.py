@@ -1,21 +1,23 @@
 """
 Сервис для отправки сообщений в Telegram из бэкенда.
 """
+
 import aiohttp
-from config.settings import settings
-from app.utils.logger import logger
+
 from app.models.schemas import RemediationPlan
+from app.utils.logger import logger
+from config.settings import settings
 
 API_URL = f"https://api.telegram.org/bot{settings.telegram_token}"
 
 
 class TelegramService:
     """Класс-обертка для совместимости с другими сервисами."""
-    
+
     async def send_message(self, text: str, parse_mode: str = "Markdown"):
         """Send a message via Telegram."""
         await send_message(text, parse_mode)
-    
+
     async def send_approval_request(self, plan: RemediationPlan):
         """Send approval request via Telegram."""
         await send_approval_request(plan)
@@ -24,16 +26,11 @@ class TelegramService:
 async def send_message(text: str, parse_mode: str = "Markdown"):
     """Отправляет простое текстовое сообщение администратору."""
     url = f"{API_URL}/sendMessage"
-    payload = {
-        "chat_id": settings.admin_chat_id,
-        "text": text,
-        "parse_mode": parse_mode
-    }
+    payload = {"chat_id": settings.admin_chat_id, "text": text, "parse_mode": parse_mode}
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload) as response:
-                if response.status != 200:
-                    logger.error(f"Ошибка отправки сообщения в Telegram: {await response.text()}")
+        async with aiohttp.ClientSession() as session, session.post(url, json=payload) as response:
+            if response.status != 200:
+                logger.error(f"Ошибка отправки сообщения в Telegram: {await response.text()}")
     except Exception as e:
         logger.error(f"Исключение при отправке сообщения в Telegram: {e}")
 
@@ -57,22 +54,16 @@ async def send_approval_request(plan: RemediationPlan):
         "inline_keyboard": [
             [
                 {"text": "✅ Утвердить", "callback_data": f"approve:{plan.plan_id}"},
-                {"text": "❌ Отклонить", "callback_data": f"reject:{plan.plan_id}"}
+                {"text": "❌ Отклонить", "callback_data": f"reject:{plan.plan_id}"},
             ]
         ]
     }
 
     url = f"{API_URL}/sendMessage"
-    payload = {
-        "chat_id": settings.admin_chat_id,
-        "text": text,
-        "parse_mode": "Markdown",
-        "reply_markup": keyboard
-    }
+    payload = {"chat_id": settings.admin_chat_id, "text": text, "parse_mode": "Markdown", "reply_markup": keyboard}
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload) as response:
-                if response.status != 200:
-                    logger.error(f"Ошибка отправки запроса на утверждение: {await response.text()}")
+        async with aiohttp.ClientSession() as session, session.post(url, json=payload) as response:
+            if response.status != 200:
+                logger.error(f"Ошибка отправки запроса на утверждение: {await response.text()}")
     except Exception as e:
         logger.error(f"Исключение при отправке запроса на утверждение: {e}")

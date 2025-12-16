@@ -4,17 +4,12 @@ AIOps Core API
 Центральный API для управления AIOps системой.
 """
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
-from fastapi.responses import JSONResponse
-from typing import List, Dict, Any
 import asyncio
+import contextlib
 
-from app.models.schemas import (
-    AnalysisRequest,
-    ApprovalRequest,
-    SystemStatus,
-    RemediationPlan
-)
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+
+from app.models.schemas import AnalysisRequest, ApprovalRequest, RemediationPlan, SystemStatus
 from app.services import analysis_service, system_service, telegram_service
 from app.services.notification_service import notification_service
 from app.services.streaming_service import streaming_service
@@ -36,18 +31,18 @@ _background_tasks = []
 async def startup_event():
     """Initialize services on startup."""
     logger.info("AIOps Core API запускается...")
-    
+
     # Start notification processor
     if settings.enable_notifications:
         task = asyncio.create_task(notification_service.start_processor())
         _background_tasks.append(task)
         logger.info("Notification processor started")
-    
+
     # Initialize streaming service
     if settings.streaming_enabled:
         await streaming_service.initialize()
         logger.info("Streaming service initialized")
-    
+
     await telegram_service.send_startup_message()
 
 
@@ -55,28 +50,27 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup on shutdown."""
     logger.info("AIOps Core API останавливается...")
-    
+
     # Stop notification processor
     await notification_service.stop_processor()
-    
+
     # Stop streaming consumer
     await streaming_service.stop_consumer()
-    
+
     # Cancel background tasks
     for task in _background_tasks:
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
-    
+
     # Close data collector connections
     await analysis_service.data_collector.close()
-    
+
     logger.info("AIOps Core API остановлен")
 
 
 # ==================== General Endpoints ====================
+
 
 @app.get("/", tags=["General"])
 async def read_root():
@@ -92,8 +86,8 @@ async def health_check():
         "services": {
             "api": True,
             "notifications": settings.enable_notifications,
-            "streaming": settings.streaming_enabled
-        }
+            "streaming": settings.streaming_enabled,
+        },
     }
 
 
@@ -123,25 +117,22 @@ async def get_streaming_status():
 
 # ==================== Analysis Endpoints ====================
 
+
 @app.post("/analyze", tags=["Analysis"])
-async def analyze_service_endpoint(
-    request: AnalysisRequest,
-    background_tasks: BackgroundTasks
-):
+async def analyze_service_endpoint(request: AnalysisRequest, background_tasks: BackgroundTasks):
     """
     Запускает асинхронный анализ для указанного сервиса.
     """
     logger.info(f"Получен запрос на анализ для сервиса: {request.service_name}")
     await telegram_service.send_message(f"▶️ Начинаю анализ для сервиса: *{request.service_name}*")
     background_tasks.add_task(
-        analysis_service.trigger_full_analysis,
-        service_name=request.service_name,
-        time_window=request.time_window
+        analysis_service.trigger_full_analysis, service_name=request.service_name, time_window=request.time_window
     )
     return {"status": "Analysis started in the background."}
 
 
 # ==================== Action Endpoints ====================
+
 
 @app.post("/approve", tags=["Actions"])
 async def approve_remediation_plan(request: ApprovalRequest):
@@ -169,6 +160,7 @@ async def get_plan_by_id(plan_id: str):
 
 # ==================== Webhook Endpoints ====================
 
+
 @app.post("/api/v1/webhooks/alertmanager", tags=["Webhooks"])
 async def alertmanager_webhook(request: Request, background_tasks: BackgroundTasks):
     """
@@ -177,17 +169,14 @@ async def alertmanager_webhook(request: Request, background_tasks: BackgroundTas
     """
     if not settings.alertmanager_webhook_enabled:
         raise HTTPException(status_code=403, detail="Alertmanager webhook is disabled")
-    
+
     try:
         payload = await request.json()
         logger.info(f"Received Alertmanager webhook: {payload.get('status')}")
-        
+
         # Process in background
-        background_tasks.add_task(
-            analysis_service.handle_alertmanager_webhook,
-            payload
-        )
-        
+        background_tasks.add_task(analysis_service.handle_alertmanager_webhook, payload)
+
         return {"status": "accepted", "message": "Webhook received and queued for processing"}
     except Exception as e:
         logger.error(f"Error processing Alertmanager webhook: {e}")
@@ -202,15 +191,15 @@ async def logs_webhook(request: Request):
     """
     if not settings.streaming_enabled:
         raise HTTPException(status_code=403, detail="Streaming is disabled")
-    
+
     try:
         payload = await request.json()
-        
+
         # Handle both single log and batch
         logs = payload if isinstance(payload, list) else [payload]
-        
+
         from app.services.streaming_service import LogEntry
-        
+
         for log_data in logs:
             log_entry = LogEntry(
                 timestamp=log_data.get("@timestamp", log_data.get("timestamp", "")),
@@ -218,10 +207,10 @@ async def logs_webhook(request: Request):
                 level=log_data.get("log", {}).get("level", log_data.get("level", "info")),
                 message=log_data.get("message", ""),
                 source=log_data.get("source", ""),
-                metadata=log_data
+                metadata=log_data,
             )
             await streaming_service.buffer_log(log_entry)
-        
+
         return {"status": "accepted", "count": len(logs)}
     except Exception as e:
         logger.error(f"Error processing logs webhook: {e}")
@@ -236,19 +225,15 @@ async def custom_webhook(request: Request, background_tasks: BackgroundTasks):
     try:
         payload = await request.json()
         event_type = payload.get("event_type", "unknown")
-        
+
         logger.info(f"Received custom webhook: {event_type}")
-        
+
         # Route based on event type
         if event_type == "alert":
             service = payload.get("service", "unknown")
-            message = payload.get("message", "Custom alert received")
-            background_tasks.add_task(
-                analysis_service.trigger_full_analysis,
-                service_name=service,
-                time_window="15m"
-            )
-        
+            payload.get("message", "Custom alert received")
+            background_tasks.add_task(analysis_service.trigger_full_analysis, service_name=service, time_window="15m")
+
         return {"status": "accepted", "event_type": event_type}
     except Exception as e:
         logger.error(f"Error processing custom webhook: {e}")
@@ -257,6 +242,7 @@ async def custom_webhook(request: Request, background_tasks: BackgroundTasks):
 
 # ==================== Notification Endpoints ====================
 
+
 @app.post("/api/v1/notify", tags=["Notifications"])
 async def send_notification(request: Request):
     """
@@ -264,16 +250,16 @@ async def send_notification(request: Request):
     """
     try:
         payload = await request.json()
-        
+
         from app.services.notification_service import send_alert
-        
+
         notification_id = await send_alert(
             title=payload.get("title", "Notification"),
             message=payload.get("message", ""),
             priority=payload.get("priority", "medium"),
-            channels=payload.get("channels")
+            channels=payload.get("channels"),
         )
-        
+
         return {"status": "queued", "notification_id": notification_id}
     except Exception as e:
         logger.error(f"Error sending notification: {e}")
@@ -281,6 +267,7 @@ async def send_notification(request: Request):
 
 
 # ==================== Metrics Endpoint ====================
+
 
 @app.get("/metrics", tags=["Monitoring"])
 async def prometheus_metrics():
@@ -290,17 +277,17 @@ async def prometheus_metrics():
     # Basic metrics - can be extended with prometheus_client library
     queue_stats = await notification_service.queue.get_queue_stats()
     stream_info = await streaming_service.get_stream_info()
-    
+
     metrics = []
-    
+
     # Notification queue metrics
     if queue_stats.get("available"):
         metrics.append(f'aiops_notifications_pending {queue_stats.get("pending", 0)}')
         metrics.append(f'aiops_notifications_failed {queue_stats.get("failed", 0)}')
         metrics.append(f'aiops_notifications_processed {queue_stats.get("processed", 0)}')
-    
+
     # Streaming metrics
     if stream_info.get("available"):
         metrics.append(f'aiops_stream_length {stream_info.get("length", 0)}')
-    
+
     return "\n".join(metrics)

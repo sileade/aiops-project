@@ -7,47 +7,42 @@ Features:
 - Кэширование ответов в Redis
 - Circuit Breaker для graceful degradation
 """
+
+import hashlib
 import json
 import os
-import hashlib
-from typing import Optional, Dict, Any
+from typing import Any
+
 from openai import AsyncOpenAI
 
-from app.utils.logger import logger
-from app.utils.circuit_breaker import (
-    CircuitBreaker, 
-    CircuitBreakerConfig, 
-    CircuitBreakerOpenError,
-    openai_breaker,
-    ollama_breaker
-)
-from app.services.cache_service import cache, generate_cache_key
-from config.settings import settings
 from app.models.schemas import LogAnalysisResult, SeverityLevel
-
+from app.services.cache_service import cache
+from app.utils.circuit_breaker import (
+    CircuitBreakerOpenError,
+    ollama_breaker,
+    openai_breaker,
+)
+from app.utils.logger import logger
 
 # ==================== LLM Clients ====================
 
 # Primary: OpenAI client
 openai_client = AsyncOpenAI(
-    api_key=os.getenv("OPENAI_API_KEY"),
-    base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    api_key=os.getenv("OPENAI_API_KEY"), base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 )
 
 # Fallback: Ollama client (OpenAI-compatible API)
-ollama_client: Optional[AsyncOpenAI] = None
+ollama_client: AsyncOpenAI | None = None
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 
-def _get_ollama_client() -> Optional[AsyncOpenAI]:
+
+def _get_ollama_client() -> AsyncOpenAI | None:
     """Lazy initialization of Ollama client."""
     global ollama_client
     if ollama_client is None:
         try:
-            ollama_client = AsyncOpenAI(
-                api_key="ollama",  # Ollama doesn't need real API key
-                base_url=OLLAMA_BASE_URL
-            )
+            ollama_client = AsyncOpenAI(api_key="ollama", base_url=OLLAMA_BASE_URL)  # Ollama doesn't need real API key
         except Exception as e:
             logger.warning(f"Failed to initialize Ollama client: {e}")
     return ollama_client
@@ -63,6 +58,7 @@ CACHE_TTL_NL = 300  # 5 minutes for NL interpretation
 
 
 # ==================== Helper Functions ====================
+
 
 def _clean_json_response(text: str) -> str:
     """Remove markdown wrappers from JSON response."""
@@ -86,18 +82,14 @@ def _clean_yaml_response(text: str) -> str:
     return text.strip()
 
 
-async def _call_llm_with_fallback(
-    messages: list,
-    temperature: float = 0.1,
-    max_tokens: int = 1024
-) -> str:
+async def _call_llm_with_fallback(messages: list, temperature: float = 0.1, max_tokens: int = 1024) -> str:
     """
     Call LLM with automatic fallback from OpenAI to Ollama.
-    
+
     Returns the response text or raises exception if all providers fail.
     """
     last_error = None
-    
+
     # Try OpenAI first
     try:
         if not openai_breaker.is_open:
@@ -106,7 +98,7 @@ async def _call_llm_with_fallback(
                 model=DEFAULT_MODEL,
                 messages=messages,
                 temperature=temperature,
-                max_tokens=max_tokens
+                max_tokens=max_tokens,
             )
             return response.choices[0].message.content.strip()
     except CircuitBreakerOpenError:
@@ -114,7 +106,7 @@ async def _call_llm_with_fallback(
     except Exception as e:
         last_error = e
         logger.warning(f"OpenAI call failed: {e}, trying Ollama fallback...")
-    
+
     # Fallback to Ollama
     ollama = _get_ollama_client()
     if ollama:
@@ -125,7 +117,7 @@ async def _call_llm_with_fallback(
                     model=OLLAMA_MODEL,
                     messages=messages,
                     temperature=temperature,
-                    max_tokens=max_tokens
+                    max_tokens=max_tokens,
                 )
                 logger.info("Successfully used Ollama fallback")
                 return response.choices[0].message.content.strip()
@@ -134,7 +126,7 @@ async def _call_llm_with_fallback(
         except Exception as e:
             logger.error(f"Ollama fallback also failed: {e}")
             last_error = e
-    
+
     # All providers failed
     if last_error:
         raise last_error
@@ -143,23 +135,24 @@ async def _call_llm_with_fallback(
 
 # ==================== Main Functions ====================
 
+
 async def analyze_logs_with_llm(logs: str) -> LogAnalysisResult:
     """
     Анализирует логи с помощью LLM и возвращает структурированный результат.
     Использует кэширование и fallback на Ollama.
     """
     logger.info("Отправка логов на анализ в LLM...")
-    
+
     # Generate cache key based on logs content
     logs_hash = hashlib.md5(logs.encode()).hexdigest()[:16]
     cache_key = f"aiops:analysis:{logs_hash}"
-    
+
     # Check cache
     cached = await cache.get(cache_key)
     if cached:
         logger.info("Возвращаем закэшированный результат анализа")
         return LogAnalysisResult(**cached)
-    
+
     system_prompt = """Ты — эксперт по анализу логов IT-инфраструктуры. Твоя задача — проанализировать предоставленные логи и выявить проблемы.
 
 Ты ДОЛЖЕН вернуть ответ ТОЛЬКО в формате JSON без дополнительного текста:
@@ -186,50 +179,47 @@ async def analyze_logs_with_llm(logs: str) -> LogAnalysisResult:
 
     try:
         response_text = await _call_llm_with_fallback(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
             temperature=0.1,
-            max_tokens=1024
+            max_tokens=1024,
         )
-        
+
         response_text = _clean_json_response(response_text)
-        
+
         try:
             result_json = json.loads(response_text)
-            
+
             # Map severity to enum
             severity_map = {
                 "low": SeverityLevel.LOW,
                 "medium": SeverityLevel.MEDIUM,
                 "high": SeverityLevel.HIGH,
-                "critical": SeverityLevel.CRITICAL
+                "critical": SeverityLevel.CRITICAL,
             }
             severity_str = result_json.get("severity", "medium").lower()
             result_json["severity"] = severity_map.get(severity_str, SeverityLevel.MEDIUM)
-            
+
             # Cache the result
             cache_data = {
                 "summary": result_json.get("summary"),
                 "root_cause": result_json.get("root_cause"),
                 "severity": result_json["severity"].value,
-                "relevant_logs": result_json.get("relevant_logs", [])
+                "relevant_logs": result_json.get("relevant_logs", []),
             }
             await cache.set(cache_key, cache_data, CACHE_TTL_ANALYSIS)
-            
+
             logger.info(f"LLM успешно проанализировал логи. Причина: {result_json.get('root_cause')}")
             return LogAnalysisResult(**result_json)
-            
+
         except json.JSONDecodeError as e:
             logger.error(f"Ошибка декодирования JSON ответа от LLM: {e}")
             return LogAnalysisResult(
                 summary="Не удалось распарсить ответ AI",
                 root_cause="Ошибка парсинга JSON",
                 severity=SeverityLevel.MEDIUM,
-                relevant_logs=[logs[:500]]
+                relevant_logs=[logs[:500]],
             )
-            
+
     except Exception as e:
         logger.error(f"Исключение при вызове LLM: {e}")
         # Return degraded response instead of raising
@@ -237,7 +227,7 @@ async def analyze_logs_with_llm(logs: str) -> LogAnalysisResult:
             summary="AI анализ временно недоступен",
             root_cause=f"Ошибка LLM: {str(e)[:100]}",
             severity=SeverityLevel.MEDIUM,
-            relevant_logs=[logs[:500]]
+            relevant_logs=[logs[:500]],
         )
 
 
@@ -247,18 +237,18 @@ async def generate_remediation_plan(context: str) -> str:
     Использует кэширование и fallback.
     """
     logger.info("Генерация Ansible плейбука с помощью LLM...")
-    
+
     # Generate cache key
     context_hash = hashlib.md5(context.encode()).hexdigest()[:16]
     cache_key = f"aiops:playbook:{context_hash}"
-    
+
     # Check cache
     cached = await cache.get(cache_key)
     if cached:
         logger.info("Возвращаем закэшированный плейбук")
         return cached
-    
-    system_prompt = """Ты — старший DevOps-инженер с опытом работы с Ansible. 
+
+    system_prompt = """Ты — старший DevOps-инженер с опытом работы с Ansible.
 Твоя задача — создавать безопасные и эффективные Ansible плейбуки для исправления проблем в IT-инфраструктуре.
 
 Правила:
@@ -283,22 +273,19 @@ async def generate_remediation_plan(context: str) -> str:
 
     try:
         response_text = await _call_llm_with_fallback(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
             temperature=0.2,
-            max_tokens=2048
+            max_tokens=2048,
         )
-        
+
         playbook_yaml = _clean_yaml_response(response_text)
-        
+
         # Cache the result
         await cache.set(cache_key, playbook_yaml, CACHE_TTL_PLAYBOOK)
-        
+
         logger.info("LLM успешно сгенерировал плейбук.")
         return playbook_yaml
-        
+
     except Exception as e:
         logger.error(f"Исключение при генерации плейбука: {e}")
         # Return a basic diagnostic playbook as fallback
@@ -311,11 +298,11 @@ async def generate_remediation_plan(context: str) -> str:
     - name: Сбор информации о системе
       debug:
         msg: "Hostname: {{ ansible_hostname }}, OS: {{ ansible_distribution }}"
-    
+
     - name: Проверка дискового пространства
       shell: df -h
       register: disk_space
-    
+
     - name: Вывод информации о дисках
       debug:
         var: disk_space.stdout_lines
@@ -328,18 +315,18 @@ async def interpret_natural_language(query: str) -> dict:
     Использует кэширование для частых команд.
     """
     logger.info(f"Интерпретация команды: {query}")
-    
+
     # Generate cache key
     query_hash = hashlib.md5(query.lower().strip().encode()).hexdigest()[:16]
     cache_key = f"aiops:nl:{query_hash}"
-    
+
     # Check cache
     cached = await cache.get(cache_key)
     if cached:
         logger.info("Возвращаем закэшированную интерпретацию")
         return cached
-    
-    system_prompt = """Ты — интерпретатор команд для AIOps системы. 
+
+    system_prompt = """Ты — интерпретатор команд для AIOps системы.
 Твоя задача — преобразовать команду пользователя на естественном языке в структурированное действие.
 
 Доступные действия:
@@ -360,23 +347,20 @@ async def interpret_natural_language(query: str) -> dict:
 
     try:
         response_text = await _call_llm_with_fallback(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": query}
-            ],
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": query}],
             temperature=0.1,
-            max_tokens=256
+            max_tokens=256,
         )
-        
+
         response_text = _clean_json_response(response_text)
         result = json.loads(response_text)
-        
+
         # Cache the result
         await cache.set(cache_key, result, CACHE_TTL_NL)
-        
+
         logger.info(f"Интерпретировано: action={result.get('action')}, target={result.get('target')}")
         return result
-        
+
     except json.JSONDecodeError as e:
         logger.error(f"Ошибка парсинга ответа интерпретатора: {e}")
         return {"action": "unknown", "target": None, "parameters": {}}
@@ -387,7 +371,8 @@ async def interpret_natural_language(query: str) -> dict:
 
 # ==================== Health Check ====================
 
-async def get_llm_status() -> Dict[str, Any]:
+
+async def get_llm_status() -> dict[str, Any]:
     """Get status of all LLM providers."""
     return {
         "openai": {
@@ -399,5 +384,5 @@ async def get_llm_status() -> Dict[str, Any]:
             "model": OLLAMA_MODEL,
             "base_url": OLLAMA_BASE_URL,
         },
-        "cache": await cache.health_check()
+        "cache": await cache.health_check(),
     }

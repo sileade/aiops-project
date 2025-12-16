@@ -1,0 +1,147 @@
+[project]
+name = "aiops-platform"
+version = "2.0.0"
+description = "Intelligent AIOps platform for automated IT infrastructure monitoring and management"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "AIOps Team"}
+]
+keywords = ["aiops", "monitoring", "automation", "devops", "ai"]
+
+[project.urls]
+Homepage = "https://github.com/sileade/aiops-project"
+Repository = "https://github.com/sileade/aiops-project"
+
+# ============================================================================
+# RUFF - Fast Python Linter
+# ============================================================================
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "*.pyc",
+    ".eggs",
+    "*.egg",
+    "build",
+    "dist",
+    "alembic/versions",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "ARG",    # flake8-unused-arguments
+    "SIM",    # flake8-simplify
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # do not perform function calls in argument defaults
+    "B904",   # raise without from inside except
+    "ARG001", # unused function argument (common in handlers)
+    "ARG002", # unused method argument
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG", "S101"]  # Allow assert and unused args in tests
+"alembic/*" = ["ALL"]        # Skip alembic migrations
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "bot", "config"]
+force-single-line = false
+combine-as-imports = true
+
+# ============================================================================
+# BLACK - Code Formatter
+# ============================================================================
+[tool.black]
+target-version = ["py311"]
+line-length = 120
+exclude = '''
+/(
+    \.git
+    | \.venv
+    | venv
+    | __pycache__
+    | \.eggs
+    | build
+    | dist
+    | alembic/versions
+)/
+'''
+
+# ============================================================================
+# PYTEST - Testing Framework
+# ============================================================================
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "-ra",
+]
+markers = [
+    "unit: Unit tests (fast, no external dependencies)",
+    "integration: Integration tests (may require external services)",
+    "slow: Slow tests (skip with -m 'not slow')",
+]
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+# ============================================================================
+# COVERAGE - Code Coverage
+# ============================================================================
+[tool.coverage.run]
+source = ["app", "bot"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/alembic/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "pass",
+]
+show_missing = true
+precision = 2
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+# ============================================================================
+# MYPY - Static Type Checking (optional)
+# ============================================================================
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+exclude = [
+    "alembic/",
+    "tests/",
+]
