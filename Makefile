@@ -209,3 +209,107 @@ dev: up logs ## Запустить и показать логи (для разр
 prod: up-build ## Собрать и запустить для production
 
 quick-test: lint test ## Быстрая проверка (линт + тесты)
+
+# =============================================================================
+# PROFILE COMMANDS (Ollama, Full)
+# =============================================================================
+
+up-ollama: ## Запустить с локальной LLM (Ollama)
+	@echo "$(GREEN)🤖 Запуск AIOps Platform с Ollama...$(NC)"
+	$(DOCKER_COMPOSE) --profile ollama up -d
+	@echo ""
+	@make status
+	@echo "$(YELLOW)📝 Для загрузки модели выполните:$(NC)"
+	@echo "   docker exec -it aiops-ollama ollama pull llama3.2"
+
+up-full: ## Запустить полную версию (Ollama + Milvus)
+	@echo "$(GREEN)🚀 Запуск AIOps Platform (Full)...$(NC)"
+	$(DOCKER_COMPOSE) --profile full up -d --build
+	@echo ""
+	@make status
+
+up-full-open: ## Запустить полную версию и открыть API Docs в браузере
+	@echo "$(GREEN)🚀 Запуск AIOps Platform (Full) с открытием документации...$(NC)"
+	$(DOCKER_COMPOSE) --profile full up -d --build
+	@echo ""
+	@echo "$(YELLOW)⏳ Ожидание запуска API...$(NC)"
+	@sleep 10
+	@echo "$(GREEN)🌐 Открытие документации API...$(NC)"
+	@if command -v xdg-open > /dev/null; then \
+		xdg-open http://localhost:8000/docs; \
+	elif command -v open > /dev/null; then \
+		open http://localhost:8000/docs; \
+	elif command -v start > /dev/null; then \
+		start http://localhost:8000/docs; \
+	else \
+		echo "$(YELLOW)Откройте в браузере: http://localhost:8000/docs$(NC)"; \
+	fi
+	@echo ""
+	@make status
+
+down-ollama: ## Остановить сервисы с профилем Ollama
+	$(DOCKER_COMPOSE) --profile ollama down
+
+down-full: ## Остановить сервисы с профилем Full
+	$(DOCKER_COMPOSE) --profile full down
+
+# =============================================================================
+# BROWSER COMMANDS
+# =============================================================================
+
+open-docs: ## Открыть API документацию в браузере
+	@echo "$(GREEN)🌐 Открытие API Docs...$(NC)"
+	@if command -v xdg-open > /dev/null; then \
+		xdg-open http://localhost:8000/docs; \
+	elif command -v open > /dev/null; then \
+		open http://localhost:8000/docs; \
+	elif command -v start > /dev/null; then \
+		start http://localhost:8000/docs; \
+	else \
+		echo "$(YELLOW)Откройте в браузере: http://localhost:8000/docs$(NC)"; \
+	fi
+
+open-grafana: ## Открыть Grafana в браузере
+	@echo "$(GREEN)📊 Открытие Grafana...$(NC)"
+	@if command -v xdg-open > /dev/null; then \
+		xdg-open http://localhost:3000; \
+	elif command -v open > /dev/null; then \
+		open http://localhost:3000; \
+	elif command -v start > /dev/null; then \
+		start http://localhost:3000; \
+	else \
+		echo "$(YELLOW)Откройте в браузере: http://localhost:3000$(NC)"; \
+	fi
+
+open-prometheus: ## Открыть Prometheus в браузере
+	@echo "$(GREEN)📈 Открытие Prometheus...$(NC)"
+	@if command -v xdg-open > /dev/null; then \
+		xdg-open http://localhost:9090; \
+	elif command -v open > /dev/null; then \
+		open http://localhost:9090; \
+	elif command -v start > /dev/null; then \
+		start http://localhost:9090; \
+	else \
+		echo "$(YELLOW)Откройте в браузере: http://localhost:9090$(NC)"; \
+	fi
+
+open-all: ## Открыть все веб-интерфейсы
+	@make open-docs
+	@sleep 1
+	@make open-grafana
+	@sleep 1
+	@make open-prometheus
+
+# =============================================================================
+# OLLAMA COMMANDS
+# =============================================================================
+
+ollama-pull: ## Загрузить модель Ollama (llama3.2)
+	@echo "$(GREEN)📥 Загрузка модели llama3.2...$(NC)"
+	docker exec -it aiops-ollama ollama pull llama3.2
+
+ollama-list: ## Показать установленные модели Ollama
+	docker exec -it aiops-ollama ollama list
+
+ollama-run: ## Запустить интерактивный чат с Ollama
+	docker exec -it aiops-ollama ollama run llama3.2
