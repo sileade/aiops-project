@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     
     # System
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
+
+    # Database
+    database_url: str = os.getenv("DATABASE_URL", "sqlite:///./aiops.db")
     
     class Config:
         env_file = ".env"

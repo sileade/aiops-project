@@ -48,6 +48,7 @@ class RemediationCycle(Base):
 
     # Связь с шагами цикла
     steps = relationship("CycleStep", back_populates="cycle", cascade="all, delete-orphan")
+    agi_events = relationship("AGIHistory", back_populates="cycle", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<RemediationCycle(id={self.id}, status={self.status})>"
